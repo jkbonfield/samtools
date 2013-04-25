@@ -1,6 +1,6 @@
 #include <unistd.h>
 #include <assert.h>
-#include "bam.h"
+#include "sam.h"
 
 typedef struct {
 	long long n_reads[2], n_mapped[2], n_pair_all[2], n_pair_map[2], n_pair_good[2];
@@ -30,7 +30,7 @@ typedef struct {
 		if ((c)->flag & BAM_FDUP) ++(s)->n_dup[w];						\
 	} while (0)
 
-bam_flagstat_t *bam_flagstat_core(bamFile fp)
+bam_flagstat_t *bam_flagstat_core(samfile_t *fp)
 {
 	bam_flagstat_t *s;
 	bam1_t *b;
@@ -39,7 +39,7 @@ bam_flagstat_t *bam_flagstat_core(bamFile fp)
 	s = (bam_flagstat_t*)calloc(1, sizeof(bam_flagstat_t));
 	b = bam_init1();
 	c = &b->core;
-	while ((ret = bam_read1(fp, b)) >= 0)
+	while ((ret = samread(fp, b)) >= 0)
 		flagstat_loop(s, c);
 	bam_destroy1(b);
 	if (ret != -1)
@@ -48,16 +48,22 @@ bam_flagstat_t *bam_flagstat_core(bamFile fp)
 }
 int bam_flagstat(int argc, char *argv[])
 {
-	bamFile fp;
+	samfile_t *fp;
 	bam_header_t *header;
 	bam_flagstat_t *s;
+	char *mode = "rb";
+
+	if (argc > 1 && !strcmp(argv[1], "-S")) mode = "r",  argc--, argv++;
+	if (argc > 1 && !strcmp(argv[1], "-b")) mode = "rb", argc--, argv++;
+	if (argc > 1 && !strcmp(argv[1], "-D")) mode = "rc", argc--, argv++;
+
 	if (argc == optind) {
 		fprintf(stderr, "Usage: samtools flagstat <in.bam>\n");
 		return 1;
 	}
-	fp = strcmp(argv[optind], "-")? bam_open(argv[optind], "r") : bam_dopen(fileno(stdin), "r");
+	fp = samopen(argv[optind], mode, NULL);
 	assert(fp);
-	header = bam_header_read(fp);
+	header = fp->header;
 	s = bam_flagstat_core(fp);
 	printf("%lld + %lld in total (QC-passed reads + QC-failed reads)\n", s->n_reads[0], s->n_reads[1]);
 	printf("%lld + %lld duplicates\n", s->n_dup[0], s->n_dup[1]);
@@ -71,7 +77,6 @@ int bam_flagstat(int argc, char *argv[])
 	printf("%lld + %lld with mate mapped to a different chr\n", s->n_diffchr[0], s->n_diffchr[1]);
 	printf("%lld + %lld with mate mapped to a different chr (mapQ>=5)\n", s->n_diffhigh[0], s->n_diffhigh[1]);
 	free(s);
-	bam_header_destroy(header);
-	bam_close(fp);
+	samclose(fp);
 	return 0;
 }

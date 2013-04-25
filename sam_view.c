@@ -127,7 +127,7 @@ static int usage(int is_long_help);
 
 int main_samview(int argc, char *argv[])
 {
-	int c, is_header = 0, is_header_only = 0, is_bamin = 1, ret = 0, compress_level = -1, is_bamout = 0, is_count = 0;
+        int c, is_header = 0, is_header_only = 0, is_bamin = 1, ret = 0, compress_level = -1, is_bamout = 0, is_count = 0, is_cramin = 0, is_cramout = 0;
 	int of_type = BAM_OFDEC, is_long_help = 0, n_threads = 0;
 	int64_t count = 0;
 	samfile_t *in = 0, *out = 0;
@@ -135,7 +135,7 @@ int main_samview(int argc, char *argv[])
 
 	/* parse command-line options */
 	strcpy(in_mode, "r"); strcpy(out_mode, "w");
-	while ((c = getopt(argc, argv, "SbBct:h1Ho:q:f:F:ul:r:xX?T:R:L:s:Q:@:m:")) >= 0) {
+	while ((c = getopt(argc, argv, "SCbDBct:h1Ho:q:f:F:ul:r:xX?T:R:L:s:Q:@:m:")) >= 0) {
 		switch (c) {
 		case 's':
 			if ((g_subsam_seed = strtol(optarg, &q, 10)) != 0) {
@@ -146,6 +146,8 @@ int main_samview(int argc, char *argv[])
 			break;
 		case 'm': g_min_qlen = atoi(optarg); break;
 		case 'c': is_count = 1; break;
+		case 'D': is_cramin  = 1; is_bamin  = 0; break;
+		case 'C': is_cramout = 1; is_bamout = 0; break;
 		case 'S': is_bamin = 0; break;
 		case 'b': is_bamout = 1; break;
 		case 't': fn_list = strdup(optarg); is_bamin = 0; break;
@@ -179,6 +181,8 @@ int main_samview(int argc, char *argv[])
 		else if (of_type == BAM_OFSTR) strcat(out_mode, "X");
 	}
 	if (is_bamin) strcat(in_mode, "b");
+	if (is_cramin) strcat(in_mode, "c");
+	if (is_cramout) strcat(out_mode, "c");
 	if (is_header) strcat(out_mode, "h");
 	if (compress_level >= 0) {
 		char tmp[2];

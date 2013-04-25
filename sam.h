@@ -1,6 +1,7 @@
 #ifndef BAM_SAM_H
 #define BAM_SAM_H
 
+#include "io_lib/cram.h"
 #include "bam.h"
 
 /*!
@@ -27,6 +28,7 @@ typedef struct {
 		tamFile tamr;
 		bamFile bam;
 		FILE *tamw;
+	        cram_fd *cram;
 	} x;
 	bam_header_t *header;
 } samfile_t;

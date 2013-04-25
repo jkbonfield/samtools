@@ -3,8 +3,11 @@
 #include "faidx.h"
 #include "sam.h"
 
+// A bit of a hack as it's part bit field part not. Reimplement this
+#define TYPE_SAM  0
 #define TYPE_BAM  1
 #define TYPE_READ 2
+#define TYPE_CRAM 4
 
 bam_header_t *bam_header_dup(const bam_header_t *h0)
 {
@@ -46,15 +49,31 @@ int samthreads(samfile_t *fp, int n_threads, int n_sub_blks)
 samfile_t *samopen(const char *fn, const char *mode, const void *aux)
 {
 	samfile_t *fp;
+	int fmt = TYPE_SAM;
+
+	if (strchr(mode, 'b'))
+	    fmt = TYPE_BAM;
+	else if (strchr(mode, 'c'))
+	    fmt = TYPE_CRAM;
+
 	fp = (samfile_t*)calloc(1, sizeof(samfile_t));
 	if (strchr(mode, 'r')) { // read
 		fp->type |= TYPE_READ;
-		if (strchr(mode, 'b')) { // binary
+		switch (fmt) {
+		case TYPE_BAM:
 			fp->type |= TYPE_BAM;
 			fp->x.bam = strcmp(fn, "-")? bam_open(fn, "r") : bam_dopen(fileno(stdin), "r");
 			if (fp->x.bam == 0) goto open_err_ret;
 			fp->header = bam_header_read(fp->x.bam);
-		} else { // text
+			break;
+
+		case TYPE_CRAM:
+			fp->type |= TYPE_CRAM;
+			fp->x.cram = cram_open((char *)fn, "rb");
+			fp->header = cram_header_to_bam(fp->x.cram->header);
+			break;
+
+		default:
 			fp->x.tamr = sam_open(fn);
 			if (fp->x.tamr == 0) goto open_err_ret;
 			fp->header = sam_header_read(fp->x.tamr);
@@ -69,10 +88,12 @@ samfile_t *samopen(const char *fn, const char *mode, const void *aux)
 				if (fp->header->n_targets == 0 && bam_verbose >= 1)
 					fprintf(stderr, "[samopen] no @SQ lines in the header.\n");
 			} else if (bam_verbose >= 2) fprintf(stderr, "[samopen] SAM header is present: %d sequences.\n", fp->header->n_targets);
+			break;
 		}
 	} else if (strchr(mode, 'w')) { // write
 		fp->header = bam_header_dup((const bam_header_t*)aux);
-		if (strchr(mode, 'b')) { // binary
+		switch (fmt) {
+		case TYPE_BAM: {
 			char bmode[3];
 			int i, compress_level = -1;
 			for (i = 0; mode[i]; ++i) if (mode[i] >= '0' && mode[i] <= '9') break;
@@ -83,7 +104,20 @@ samfile_t *samopen(const char *fn, const char *mode, const void *aux)
 			fp->x.bam = strcmp(fn, "-")? bam_open(fn, bmode) : bam_dopen(fileno(stdout), bmode);
 			if (fp->x.bam == 0) goto open_err_ret;
 			bam_header_write(fp->x.bam, fp->header);
-		} else { // text
+			break;
+		}
+
+		case TYPE_CRAM: {
+			char *cp = strchr(mode, 'c');
+			*cp = 'b';
+			fp->type |= TYPE_CRAM;
+			fp->x.cram = cram_open((char *)fn, mode);
+			fp->x.cram->header = bam_header_to_cram(fp->header);
+			cram_write_SAM_hdr(fp->x.cram, fp->x.cram->header);
+			break;
+		}
+
+		default:
 			// open file
 			fp->x.tamw = strcmp(fn, "-")? fopen(fn, "w") : stdout;
 			if (fp->x.tamw == 0) goto open_err_ret;
@@ -124,6 +158,7 @@ void samclose(samfile_t *fp)
 	if (fp == 0) return;
 	if (fp->header) bam_header_destroy(fp->header);
 	if (fp->type & TYPE_BAM) bam_close(fp->x.bam);
+	else if (fp->type & TYPE_CRAM) cram_close(fp->x.cram);
 	else if (fp->type & TYPE_READ) sam_close(fp->x.tamr);
 	else fclose(fp->x.tamw);
 	free(fp);
@@ -133,6 +168,7 @@ int samread(samfile_t *fp, bam1_t *b)
 {
 	if (fp == 0 || !(fp->type & TYPE_READ)) return -1; // not open for reading
 	if (fp->type & TYPE_BAM) return bam_read1(fp->x.bam, b);
+	else if (fp->type & TYPE_CRAM) return cram_get_bam_seq(fp->x.cram, &b);
 	else return sam_read1(fp->x.tamr, fp->header, b);
 }
 
@@ -140,6 +176,7 @@ int samwrite(samfile_t *fp, const bam1_t *b)
 {
 	if (fp == 0 || (fp->type & TYPE_READ)) return -1; // not open for writing
 	if (fp->type & TYPE_BAM) return bam_write1(fp->x.bam, b);
+	else if (fp->type & TYPE_CRAM) return cram_put_bam_seq(fp->x.cram, b);
 	else {
 		char *s = bam_format1_core(fp->header, b, fp->type>>2&3);
 		int l = strlen(s);

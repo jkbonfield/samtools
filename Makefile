@@ -7,11 +7,32 @@ VERSION=
 CC=			gcc
 CFLAGS=		-g -Wall $(VERSION) -O2
 #LDFLAGS=		-Wl,-rpath,\$$ORIGIN/../lib
-DFLAGS=		-D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE -D_USE_KNETFILE -D_CURSES_LIB=1
+DFLAGS=		-D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE -D_USE_KNETFILE -D_CURSES_LIB=1 -DSAMTOOLS=1
 KNETFILE_O=	knetfile.o
 LOBJS=		bgzf.o kstring.o bam_aux.o bam.o bam_import.o sam.o bam_index.o	\
 			bam_pileup.o bam_lpileup.o bam_md.o razf.o faidx.o bedidx.o \
-			$(KNETFILE_O) bam_sort.o sam_header.o bam_reheader.o kprobaln.o bam_cat.o
+			$(KNETFILE_O) bam_sort.o sam_header.o bam_reheader.o kprobaln.o bam_cat.o $(COBJS)
+COBJS=  io_lib/cram_codecs.o \
+	io_lib/cram_encode.o \
+	io_lib/cram_io.o \
+	io_lib/cram_decode.o \
+	io_lib/cram_index.o \
+	io_lib/cram_stats.o \
+	io_lib/cram_samtools.o \
+	io_lib/sam_header.o \
+	io_lib/hash_table.o \
+	io_lib/jenkins_lookup3.o \
+	io_lib/vlen.o \
+	io_lib/zfio.o \
+	io_lib/mFILE.o \
+	io_lib/md5.o \
+	io_lib/open_trace_file.o \
+	io_lib/pooled_alloc.o \
+	io_lib/string_alloc.o \
+	io_lib/dstring.o \
+	io_lib/files.o \
+	io_lib/error.o \
+	io_lib/xalloc.o
 AOBJS=		bam_tview.o bam_plcmd.o sam_view.o \
 			bam_rmdup.o bam_rmdupse.o bam_mate.o bam_stat.o bam_color.o \
 			bamtk.o kaln.o bam2bcf.o bam2bcf_indel.o errmod.o sample.o \
