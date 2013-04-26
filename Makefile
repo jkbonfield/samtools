@@ -7,7 +7,7 @@ VERSION=
 CC=			gcc
 CFLAGS=		-g -Wall $(VERSION) -O2
 #LDFLAGS=		-Wl,-rpath,\$$ORIGIN/../lib
-DFLAGS=		-D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE -D_USE_KNETFILE -D_CURSES_LIB=1 -DSAMTOOLS=1
+DFLAGS=		-D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE -D_USE_KNETFILE -D_CURSES_LIB=1 -DHAVE_LIBCURL -DSAMTOOLS=1
 KNETFILE_O=	knetfile.o
 LOBJS=		bgzf.o kstring.o bam_aux.o bam.o bam_import.o sam.o bam_index.o	\
 			bam_pileup.o bam_lpileup.o bam_md.o razf.o faidx.o bedidx.o \
@@ -75,7 +75,7 @@ libbam.a:$(LOBJS)
 		$(AR) -csru $@ $(LOBJS)
 
 samtools:lib-recur $(AOBJS)
-		$(CC) $(CFLAGS) -o $@ $(AOBJS) $(LDFLAGS) libbam.a -Lbcftools -lbcf $(LIBPATH) $(LIBCURSES) -lm -lz -lpthread
+		$(CC) $(CFLAGS) -o $@ $(AOBJS) $(LDFLAGS) libbam.a -Lbcftools -lbcf $(LIBPATH) $(LIBCURSES) -lm -lz -lpthread -lcurl
 
 razip:razip.o razf.o $(KNETFILE_O)
 		$(CC) $(CFLAGS) -o $@ $^ -lz
@@ -112,10 +112,10 @@ faidx_main.o:faidx.h razf.h
 
 
 libbam.1.dylib-local:$(LOBJS)
-		libtool -dynamic $(LOBJS) -o libbam.1.dylib -lc -lz
+		libtool -dynamic $(LOBJS) -o libbam.1.dylib -lc -lz -lcurl
 
 libbam.so.1-local:$(LOBJS)
-		$(CC) -shared -Wl,-soname,libbam.so -o libbam.so.1 $(LOBJS) -lc -lz
+		$(CC) -shared -Wl,-soname,libbam.so -o libbam.so.1 $(LOBJS) -lc -lz -lcurl
 
 dylib:
 		@$(MAKE) cleanlocal; \

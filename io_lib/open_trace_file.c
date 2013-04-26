@@ -5,6 +5,7 @@
 #if !(defined(_MSC_VER) || defined(__MINGW32__))
 #  define TRACE_ARCHIVE
 #  ifndef HAVE_LIBCURL
+#    error foo
 #    define USE_WGET
 #  endif
 #endif

@@ -1,6 +1,10 @@
 #ifndef BAM_SAM_H
 #define BAM_SAM_H
 
+#ifndef SAMTOOLS
+#  define SAMTOOLS
+#endif
+
 #include "io_lib/cram.h"
 #include "bam.h"
 

@@ -109,5 +109,5 @@ bam_header_t *cram_header_to_bam(SAM_hdr *h) {
 }
 
 SAM_hdr *bam_header_to_cram(bam_header_t *h) {
-    return _sam_header_parse(h->text, h->l_text);
+    return sam_hdr_parse(h->text, h->l_text);
 }

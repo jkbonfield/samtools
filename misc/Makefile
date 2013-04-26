@@ -2,7 +2,7 @@ CC=			gcc
 CXX=		g++
 CFLAGS=		-g -Wall -O2 #-m64 #-arch ppc
 CXXFLAGS=	$(CFLAGS)
-DFLAGS=		-D_FILE_OFFSET_BITS=64 -DSAMTOOLS=1
+DFLAGS=		-D_FILE_OFFSET_BITS=64
 OBJS=		
 PROG=		md5sum-lite md5fa maq2sam-short maq2sam-long ace2sam wgsim bamcheck
 INCLUDES=	-I..
@@ -28,7 +28,7 @@ lib-recur all-recur clean-recur cleanlocal-recur install-recur:
 lib:
 
 bamcheck:bamcheck.o
-		$(CC) $(CFLAGS) $(DFLAGS) -o $@ bamcheck.o -L.. -lm -lbam -lpthread -lz
+		$(CC) $(CFLAGS) $(DFLAGS) -o $@ bamcheck.o -L.. -lm -lbam -lpthread -lz -lcurl
 
 bamcheck.o:bamcheck.c ../faidx.h ../khash.h ../sam.h ../razf.h
 		$(CC) $(CFLAGS) $(DFLAGS) -c -I.. -o $@ bamcheck.c
