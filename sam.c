@@ -70,7 +70,11 @@ samfile_t *samopen(const char *fn, const char *mode, const void *aux)
 		case TYPE_CRAM:
 			fp->type |= TYPE_CRAM;
 			fp->x.cram = cram_open((char *)fn, "rb");
+			if (!fp->x.cram)
+			    return NULL;
 			fp->header = cram_header_to_bam(fp->x.cram->header);
+			if (!fp->header)
+			    return NULL;
 			break;
 
 		default:
@@ -112,7 +116,11 @@ samfile_t *samopen(const char *fn, const char *mode, const void *aux)
 			*cp = 'b';
 			fp->type |= TYPE_CRAM;
 			fp->x.cram = cram_open((char *)fn, mode);
+			if (!fp->x.cram)
+			    return NULL;
 			fp->x.cram->header = bam_header_to_cram(fp->header);
+			if (!fp->x.cram->header)
+			    return NULL;
 			cram_write_SAM_hdr(fp->x.cram, fp->x.cram->header);
 			break;
 		}
