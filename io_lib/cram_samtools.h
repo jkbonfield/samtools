@@ -47,4 +47,19 @@ int cram_get_bam1_seq(cram_fd *fd, bam1_t *b);
 bam_header_t *cram_header_to_bam(SAM_hdr *h);
 SAM_hdr *bam_header_to_cram(bam_header_t *h);
 
+int bam_construct_seq(bam_seq_t **bp, size_t extra_len,
+		      const char *qname, size_t qname_len,
+		      int flag,
+		      int rname,      // Ref ID
+		      int pos,
+		      int end,        // aligned start/end coords
+		      int mapq,
+		      uint32_t ncigar, const uint32_t *cigar,
+		      int mrnm,       // Mate Ref ID
+		      int mpos,
+		      int isize,
+		      int len,
+		      const char *seq,
+		      const char *qual);
+
 #endif /* _CRAM_SAMTOOLS_H_ */
