@@ -301,9 +301,11 @@ static int usage(int is_long_help)
 	fprintf(stderr, "\n");
 	fprintf(stderr, "Usage:   samtools view [options] <in.bam>|<in.sam> [region1 [...]]\n\n");
 	fprintf(stderr, "Options: -b       output BAM\n");
+	fprintf(stderr, "         -C       output CRAM\n");
 	fprintf(stderr, "         -h       print header for the SAM output\n");
 	fprintf(stderr, "         -H       print header only (no alignments)\n");
 	fprintf(stderr, "         -S       input is SAM\n");
+	fprintf(stderr, "         -D       input is CRAM\n");
 	fprintf(stderr, "         -u       uncompressed BAM output (force -b)\n");
 	fprintf(stderr, "         -1       fast compression (force -b)\n");
 	fprintf(stderr, "         -x       output FLAG in HEX (samtools-C specific)\n");
