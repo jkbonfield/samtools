@@ -43,7 +43,6 @@ cram_block *cram_encode_compression_header(cram_fd *fd, cram_container *c,
     cram_block *cb  = cram_new_block(COMPRESSION_HEADER, 0);
     cram_block *map = cram_new_block(COMPRESSION_HEADER, 0);
     int i, mc;
-    char cnt_buf[5];
 
     if (!cb || !map)
 	return NULL;
@@ -199,7 +198,7 @@ cram_block *cram_encode_compression_header(cram_fd *fd, cram_container *c,
 
         HashTableIterDestroy(iter);
     }
-    itf8_put_blk(cb, BLOCK_SIZE(map) + itf8_put(cnt_buf, mc));
+    itf8_put_blk(cb, BLOCK_SIZE(map) + itf8_size(mc));
     itf8_put_blk(cb, mc);    
     BLOCK_APPEND(cb, BLOCK_DATA(map), BLOCK_SIZE(map));
     
@@ -363,7 +362,7 @@ cram_block *cram_encode_compression_header(cram_fd *fd, cram_container *c,
 	    return NULL;
 	mc++;
     }
-    itf8_put_blk(cb, BLOCK_SIZE(map) + itf8_put(cnt_buf, mc));
+    itf8_put_blk(cb, BLOCK_SIZE(map) + itf8_size(mc));
     itf8_put_blk(cb, mc);    
     BLOCK_APPEND(cb, BLOCK_DATA(map), BLOCK_SIZE(map));
 
@@ -502,13 +501,13 @@ cram_block *cram_encode_compression_header(cram_fd *fd, cram_container *c,
 	HashTableIterDestroy(iter);
     }
 #endif
-    itf8_put_blk(cb, BLOCK_SIZE(map) + itf8_put(cnt_buf, mc));
+    itf8_put_blk(cb, BLOCK_SIZE(map) + itf8_size(mc));
     itf8_put_blk(cb, mc);    
     BLOCK_APPEND(cb, BLOCK_DATA(map), BLOCK_SIZE(map));
 
     if (fd->verbose)
 	fprintf(stderr, "Wrote compression block header in %d bytes\n",
-		BLOCK_SIZE(cb));
+		(int)BLOCK_SIZE(cb));
 
     BLOCK_UPLEN(cb);
 
@@ -1286,21 +1285,19 @@ int cram_encode_container(cram_fd *fd, cram_container *c) {
      * writing it to work out the correct offset
      */
     {
-	char tmp[5];
 	slice_offset = c_hdr->method == RAW
 	    ? c_hdr->uncomp_size
 	    : c_hdr->comp_size;
 	slice_offset += 2 +
-	    itf8_put(tmp, c_hdr->content_id) +
-	    itf8_put(tmp, c_hdr->comp_size) +
-	    itf8_put(tmp, c_hdr->uncomp_size);
+	    itf8_size(c_hdr->content_id) +
+	    itf8_size(c_hdr->comp_size) +
+	    itf8_size(c_hdr->uncomp_size);
     }
 
     c->ref_seq_id    = c->slices[0]->hdr->ref_seq_id;
     c->ref_seq_start = c->slices[0]->hdr->ref_seq_start;
     c->ref_seq_span  = c->slices[0]->hdr->ref_seq_span;
     for (i = 0; i < c->curr_slice; i++) {
-	char tmp[5];
 	cram_slice *s = c->slices[i];
 	
 	c->num_blocks += s->hdr->num_blocks + 2;
@@ -1317,15 +1314,15 @@ int cram_encode_container(cram_fd *fd, cram_container *c) {
 	    : s->hdr_block->comp_size;
 
 	slice_offset += 2 + 
-	    itf8_put(tmp, s->hdr_block->content_id) +
-	    itf8_put(tmp, s->hdr_block->comp_size) +
-	    itf8_put(tmp, s->hdr_block->uncomp_size);
+	    itf8_size(s->hdr_block->content_id) +
+	    itf8_size(s->hdr_block->comp_size) +
+	    itf8_size(s->hdr_block->uncomp_size);
 
 	for (j = 0; j < s->hdr->num_blocks; j++) {
 	    slice_offset += 2 + 
-		itf8_put(tmp, s->block[j]->content_id) +
-		itf8_put(tmp, s->block[j]->comp_size) +
-		itf8_put(tmp, s->block[j]->uncomp_size);
+		itf8_size(s->block[j]->content_id) +
+		itf8_size(s->block[j]->comp_size) +
+		itf8_size(s->block[j]->uncomp_size);
 
 	    slice_offset += s->block[j]->method == RAW
 		? s->block[j]->uncomp_size
@@ -2070,7 +2067,7 @@ int cram_put_bam_seq(cram_fd *fd, bam_seq_t *b) {
 	cr->cram_flags = 0;
     //cram_stats_add(c->CF_stats, cr->cram_flags);
 
-    cr->len         = bam_seq_len(b);  cram_stats_add(c->RL_stats, cr->len);
+    cr->len         = bam_seq_len(b); cram_stats_add(c->RL_stats, cr->len);
     c->num_bases   += cr->len;
     cr->apos        = bam_pos(b)+1;
     if (c->pos_sorted) {
@@ -2099,10 +2096,11 @@ int cram_put_bam_seq(cram_fd *fd, bam_seq_t *b) {
      */
     cr->seq         = BLOCK_SIZE(s->seqs_blk);
     cr->qual        = BLOCK_SIZE(s->qual_blk);
-    BLOCK_GROW(s->seqs_blk, cr->len);
+    BLOCK_GROW(s->seqs_blk, cr->len+1);
     BLOCK_GROW(s->qual_blk, cr->len);
     seq = cp = (char *)BLOCK_END(s->seqs_blk);
 
+    *seq = 0;
     for (i = 0; i < cr->len; i++) {
 	// FIXME: do 2 char at a time for efficiency
 	cp[i] = bam_nt16_rev_table[bam_seqi(bam_seq(b), i)];
@@ -2150,7 +2148,7 @@ int cram_put_bam_seq(cram_fd *fd, bam_seq_t *b) {
 		if (!fd->no_ref) {
 		    int end = cig_len+apos < fd->ref_end
 			? cig_len : fd->ref_end - apos;
-		    for (l = 0; l < end; l++, apos++, spos++) {
+		    for (l = 0; l < end && seq[spos]; l++, apos++, spos++) {
 			if (ref[apos] != seq[spos]) {
 			    //fprintf(stderr, "Subst: %d; %c vs %c\n",
 			    //	spos, ref[apos], seq[spos]);
@@ -2164,7 +2162,7 @@ int cram_put_bam_seq(cram_fd *fd, bam_seq_t *b) {
 
 		if (l < cig_len) {
 		    /* off end of sequence or non-ref based output */
-		    for (; l < cig_len; l++, spos++) {
+		    for (; l < cig_len && seq[spos]; l++, spos++) {
 			if (cram_add_base(fd, c, s, cr, spos,
 					  seq[spos], qual[spos]))
 			    return -1;
@@ -2244,12 +2242,24 @@ int cram_put_bam_seq(cram_fd *fd, bam_seq_t *b) {
      * be in the qual block before we append the rest of the data.
      */
     if (cr->cram_flags & CRAM_FLAG_PRESERVE_QUAL_SCORES) {
-	BLOCK_GROW(s->qual_blk, cr->len);
-	qual = cp = (char *)BLOCK_END(s->qual_blk);
-	for (i = 0; i < cr->len; i++) {
-	    cp[i] = bam_qual(b)[i];
+	/* Special case of seq "*" */
+	if (cr->len == 0) {
+	    cram_stats_add(c->RL_stats, cr->len = cr->aend - cr->apos + 1);
+	    BLOCK_GROW(s->qual_blk, cr->len);
+	    qual = cp = (char *)BLOCK_END(s->qual_blk);
+	    memset(cp, 255, cr->len);
+	} else {
+	    BLOCK_GROW(s->qual_blk, cr->len);
+	    qual = cp = (char *)BLOCK_END(s->qual_blk);
+	    for (i = 0; i < cr->len; i++) {
+		cp[i] = bam_qual(b)[i];
+	    }
 	}
 	BLOCK_SIZE(s->qual_blk) += cr->len;
+    } else {
+	if (cr->len == 0) {
+	    cram_stats_add(c->RL_stats, cr->len = cr->aend - cr->apos + 1);
+	}
     }
 
     /* Now we know apos and aend both, update mate-pair information */
