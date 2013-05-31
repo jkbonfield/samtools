@@ -587,25 +587,6 @@ cram_block_slice_hdr *cram_decode_slice_header(cram_fd *fd, cram_block *b) {
 
 
 #if 0
-/* Returns the number of bits set in val; it the highest bit used */
-static int nbits(int v) {
-    static const int MultiplyDeBruijnBitPosition[32] = {
-	1, 10, 2, 11, 14, 22, 3, 30, 12, 15, 17, 19, 23, 26, 4, 31,
-	9, 13, 21, 29, 16, 18, 25, 8, 20, 28, 24, 7, 27, 6, 5, 32
-    };
-
-    v |= v >> 1; // first up to set all bits 1 after the first 1 */
-    v |= v >> 2;
-    v |= v >> 4;
-    v |= v >> 8;
-    v |= v >> 16;
-
-    // DeBruijn magic to find top bit
-    return MultiplyDeBruijnBitPosition[(uint32_t)(v * 0x07C4ACDDU) >> 27];
-}
-#endif
-
-#if 0
 static int sort_freqs(const void *vp1, const void *vp2) {
     const int i1 = *(const int *)vp1;
     const int i2 = *(const int *)vp2;
@@ -1714,19 +1695,26 @@ cram_record *cram_get_seq(cram_fd *fd) {
 	s->last_apos = s->hdr->ref_seq_start;
 	    
 	for (id = 0; id < s->hdr->num_blocks; id++) {
-	    if (cram_uncompress_block(s->block[id]))
+	    if (cram_uncompress_block(s->block[id])) {
+		cram_free_slice(s);
+		c->slice = NULL;
 		return NULL;
+	    }
 	}
 
 	/* Skip slices not yet spanning our range */
 	if (fd->range.refid != -2) {
 	    if (s->hdr->ref_seq_id != fd->range.refid) {
 		fd->eof = 1;
+		cram_free_slice(s);
+		c->slice = NULL;
 		return NULL;
 	    }
 
 	    if (s->hdr->ref_seq_start > fd->range.end) {
 		fd->eof = 1;
+		cram_free_slice(s);
+		c->slice = NULL;
 		return NULL;
 	    }
 
@@ -1740,6 +1728,8 @@ cram_record *cram_get_seq(cram_fd *fd) {
 	/* Test decoding of 1st seq */
 	if (cram_decode_slice(fd, c, s, fd->header) != 0) {
 	    fprintf(stderr, "Failure to decode slice\n");
+	    cram_free_slice(s);
+	    c->slice = NULL;
 	    return NULL;
 	}
     }

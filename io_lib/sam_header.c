@@ -185,7 +185,7 @@ static int sam_hdr_update_hashes(SAM_hdr *sh,
 			for (i = 0; i < sh->npg_end; i++) {
 			    if (sh->pg_end[i] == hi->data.i) {
 				memmove(&sh->pg_end[i], &sh->pg_end[i+1],
-					(sh->npg_end - i)*sizeof(*sh->pg_end));
+					(sh->npg_end-i-1)*sizeof(*sh->pg_end));
 				sh->npg_end--;
 			    }
 			}
@@ -852,10 +852,10 @@ SAM_hdr *sam_hdr_parse(const char *hdr, int len) {
     /* Make an empty SAM_hdr */
     SAM_hdr *sh;
     
-    if (NULL == hdr) return NULL;
-
     sh = sam_hdr_new();
     if (NULL == sh) return NULL;
+
+    if (NULL == hdr) return sh; // empty header is permitted
 
     /* Parse the header, line by line */
     if (-1 == sam_hdr_add_lines(sh, hdr, len)) {
