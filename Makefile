@@ -32,7 +32,8 @@ COBJS=  io_lib/cram_codecs.o \
 	io_lib/dstring.o \
 	io_lib/files.o \
 	io_lib/error.o \
-	io_lib/xalloc.o
+	io_lib/xalloc.o \
+	io_lib/thread_pool.o
 AOBJS=		bam_tview.o bam_plcmd.o sam_view.o \
 			bam_rmdup.o bam_rmdupse.o bam_mate.o bam_stat.o bam_color.o \
 			bamtk.o kaln.o bam2bcf.o bam2bcf_indel.o errmod.o sample.o \
@@ -130,3 +131,4 @@ cleanlocal:
 		rm -fr gmon.out *.o a.out *.exe *.dSYM razip bgzip $(PROG) *~ *.a *.so.* *.so *.dylib
 
 clean:cleanlocal-recur
+	-rm io_lib/*.o

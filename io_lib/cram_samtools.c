@@ -68,7 +68,7 @@ int bam_construct_seq(bam_seq_t **bp, size_t extra_len,
 
     cp = b->data;
 
-    strncpy(cp, qname, qname_len);
+    strncpy((char *)cp, qname, qname_len);
     cp[qname_len] = 0;
     cp += qname_len+1;
     memcpy(cp, cigar, ncigar*4);

@@ -24,6 +24,8 @@
 #define bam_aux(b)       bam1_aux((b))
 #define bam_seqi(s,i)    bam1_seqi((s),(i))
 
+#define bam_dup(b)       bam_dup1((b))
+
 enum cigar_op {
     BAM_CMATCH=0,
     BAM_CINS=1,

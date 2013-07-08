@@ -40,7 +40,7 @@ bam_flagstat_t *bam_flagstat_core(samfile_t *fp)
 	b = bam_init1();
 	c = &b->core;
 	while ((ret = samread(fp, b)) >= 0)
-		flagstat_loop(s, c);
+	    flagstat_loop(s, c);
 	bam_destroy1(b);
 	if (ret != -1)
 		fprintf(stderr, "[bam_flagstat_core] Truncated file? Continue anyway.\n");

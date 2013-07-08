@@ -41,9 +41,13 @@ static void append_header_text(bam_header_t *header, char* text, int len)
 
 int samthreads(samfile_t *fp, int n_threads, int n_sub_blks)
 {
+    if (fp->type & TYPE_CRAM) {
+	return cram_set_option(fp->x.cram, CRAM_OPT_NTHREADS, n_threads);
+    } else {
 	if (!(fp->type&1) || (fp->type&2)) return -1;
 	bgzf_mt(fp->x.bam, n_threads, n_sub_blks);
 	return 0;
+    }
 }
 
 samfile_t *samopen(const char *fn, const char *mode, const void *aux)

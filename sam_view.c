@@ -229,6 +229,7 @@ int main_samview(int argc, char *argv[])
 		ret = 1;
 		goto view_end;
 	}
+	if (n_threads > 1 && is_cramin) samthreads(in, n_threads, 256); 
 	if (n_threads > 1) samthreads(out, n_threads, 256); 
 	if (is_header_only) goto view_end; // no need to print alignments
 
