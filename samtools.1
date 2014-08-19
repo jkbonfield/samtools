@@ -1,7 +1,30 @@
-.TH samtools 1 "27 May 2014" "samtools-0.2.0-rc8" "Bioinformatics tools"
+.TH samtools 1 "15 August 2014" "samtools-1.0" "Bioinformatics tools"
 .SH NAME
-.PP
-samtools - Utilities for the Sequence Alignment/Map (SAM) format
+samtools \- Utilities for the Sequence Alignment/Map (SAM) format
+.\"
+.\" Copyright (C) 2008-2011, 2013-2014 Genome Research Ltd.
+.\" Portions copyright (C) 2010, 2011 Broad Institute.
+.\"
+.\" Author: Heng Li <lh3@sanger.ac.uk>
+.\"
+.\" Permission is hereby granted, free of charge, to any person obtaining a
+.\" copy of this software and associated documentation files (the "Software"),
+.\" to deal in the Software without restriction, including without limitation
+.\" the rights to use, copy, modify, merge, publish, distribute, sublicense,
+.\" and/or sell copies of the Software, and to permit persons to whom the
+.\" Software is furnished to do so, subject to the following conditions:
+.\"
+.\" The above copyright notice and this permission notice shall be included in
+.\" all copies or substantial portions of the Software.
+.\"
+.\" THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+.\" IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+.\" FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+.\" THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+.\" LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+.\" FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+.\" DEALINGS IN THE SOFTWARE.
+.\"
 .SH SYNOPSIS
 .PP
 samtools view -bt ref_list.txt -o aln.bam aln.sam.gz
@@ -279,14 +302,14 @@ of input.
 
 .TP
 .B tview
-samtools tview 
-.RB [ \-p 
+samtools tview
+.RB [ \-p
 .IR chr:pos ]
-.RB [ \-s 
+.RB [ \-s
 .IR STR ]
-.RB [ \-d 
-.IR display ] 
-.RI <in.sorted.bam> 
+.RB [ \-d
+.IR display ]
+.RI <in.sorted.bam>
 .RI [ref.fasta]
 
 Text alignment viewer (based on the ncurses library). In the viewer,
@@ -335,7 +358,7 @@ In the pileup format (without
 .BR -u \ or \ -g ),
 each
 line represents a genomic position, consisting of chromosome name,
-1-based coordinate, reference base, the number of reads covering the site, 
+1-based coordinate, reference base, the number of reads covering the site,
 read bases, base qualities and alignment
 mapping qualities. Information on match, mismatch, indel, strand,
 mapping quality and start and end of a read are all encoded at the read
@@ -397,8 +420,8 @@ reference file in the FASTA format. The file can be optionally compressed by
 Exclude reads from readgroups listed in FILE (one @RG-ID per line)
 .TP
 .BI -l,\ --positions \ FILE
-BED or position list file containing a list of regions or sites where 
-pileup or BCF should be generated. If BED, positions are 0-based 
+BED or position list file containing a list of regions or sites where
+pileup or BCF should be generated. If BED, positions are 0-based
 half-open [null]
 .TP
 .BI -q,\ -min-MQ \ INT
@@ -408,9 +431,9 @@ Minimum mapping quality for an alignment to be used [0]
 Minimum base quality for a base to be considered [13]
 .TP
 .BI -r,\ --region \ STR
-Only generate pileup in region. Requires the BAM files to be indexed. 
-If used in conjunction with -l then considers the intersection of the 
-two requests. 
+Only generate pileup in region. Requires the BAM files to be indexed.
+If used in conjunction with -l then considers the intersection of the
+two requests.
 .I STR
 [all sites]
 .TP
@@ -421,7 +444,7 @@ Ignore RG tags. Treat all reads in one BAM as one sample.
 Required flags: skip reads with mask bits unset [null]
 .TP
 .BI --ff,\ --excl-flags \ STR|INT
-Filter flags: skip reads with mask bits set 
+Filter flags: skip reads with mask bits set
 [UNMAP,SECONDARY,QCFAIL,DUP]
 .TP
 .B -x,\ --ignore-overlaps
@@ -482,16 +505,20 @@ Output per-sample Phred-scaled strand bias P-value [DEPRECATED - use
 .B -t SP
 instead]
 .TP
-.BI -t,\ --format-tags \ LIST
-Comma-separated list of per-sample tags to output:
+.BI -t,\ --output-tags \ LIST
+Comma-separated list of FORMAT and INFO tags to output (case-insensitive):
 .B DP
-(Number of high-quality bases), 
+(Number of high-quality bases, FORMAT),
 .B DV
-(Number of high-quality non-reference bases), 
+(Number of high-quality non-reference bases, FORMAT),
+.B DPR
+(Number of high-quality bases for each observed allele, FORMAT),
+.B INFO/DPR
+(Number of high-quality bases for each observed allele, INFO),
 .B DP4
-(Number of high-quality ref-forward, ref-reverse, alt-forward and alt-reverse bases), 
+(Number of high-quality ref-forward, ref-reverse, alt-forward and alt-reverse bases, FORMAT),
 .B SP
-(Phred-scaled strand bias P-value)
+(Phred-scaled strand bias P-value, FORMAT)
 [null]
 .TP
 .B -u,\ --uncompressed
@@ -553,7 +580,7 @@ it is interpreted as
 .BR --open-prob .)
 .TP
 .B -p, --per-sample-mF
-Apply 
+Apply
 .B -m
 and
 .B -F
@@ -714,17 +741,23 @@ newer style of invocation.
 .B merge
 samtools merge [-nur1f] [-h inh.sam] [-R reg] [-b <list>] <out.bam> <in1.bam> <in2.bam> [<in3.bam> ... <inN.bam>]
 
-Merge multiple sorted alignments.
-The header reference lists of all the input BAM files, and the @SQ headers of
-.IR inh.sam ,
-if any, must all refer to the same set of reference sequences.
-The header reference list and (unless overridden by
-.BR -h )
-`@' headers of
-.I in1.bam
-will be copied to
-.IR out.bam ,
-and the headers of other files will be ignored.
+Merge multiple sorted alignment files, producing a single sorted output file
+that contains all the input records and maintains the existing sort order.
+
+If
+.BR -h
+is specified the @SQ headers of input files will be merged into the specified header, otherwise they will be merged
+into a composite header created from the input headers.  If in the process of merging @SQ lines for coordinate sorted
+input files, a conflict arises as to the order (for example input1.bam has @SQ for a,b,c and input2.bam has b,a,c)
+then the resulting output file will need to be re-sorted back into coordinate order.
+
+Unless the
+.BR -c
+or
+.BR -p
+flags are specified then when merging @RG and @PG records into the output header then any IDs found to be duplicates
+of existing IDs in the output header will have a suffix appended to them to diffientiate them from similar header
+records from other files and the read records will be updated to reflect this.
 
 .B OPTIONS:
 .RS
@@ -763,6 +796,12 @@ Attach an RG tag to each alignment. The tag value is inferred from file names.
 .TP
 .B -u
 Uncompressed BAM output
+.TP
+.B -c
+Combine RG tags with colliding IDs rather than adding a suffix to differentiate them.
+.TP
+.B -p
+Combine PG tags with colliding IDs rather than adding a suffix to differentiate them.
 .RE
 
 .TP
@@ -1130,7 +1169,7 @@ example, in the
 .IR merged.bam ,
 reads from
 .I ga.bam
-will be attached 
+will be attached
 .IR RG:Z:ga ,
 while reads from
 .I 454.bam
@@ -1143,10 +1182,10 @@ Call SNPs and short INDELs:
   samtools mpileup -uf ref.fa aln.bam | bcftools call -mv > var.raw.vcf
   bcftools filter -s LowQual -e '%QUAL<20 || DP>100' var.raw.vcf  > var.flt.vcf
 
-The 
+The
 .B bcftools filter
 command marks low quality sites and sites with the read depth exceeding
-a limit, which should be adjusted to about twice the average read depth 
+a limit, which should be adjusted to about twice the average read depth
 (bigger read depths usually indicate problematic regions which are
 often enriched for artefacts).  One may consider to add
 .B -C50
