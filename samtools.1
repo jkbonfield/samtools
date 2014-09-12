@@ -41,6 +41,8 @@ samtools merge out.bam in1.bam in2.bam in3.bam
 .PP
 samtools faidx ref.fasta
 .PP
+samtools fixmate in.namesorted.sam out.bam
+.PP
 samtools mpileup -C50 -gf ref.fasta -r chr3:1,000-2,000 in1.bam in2.bam
 .PP
 samtools tview aln.sorted.bam ref.fasta
@@ -126,9 +128,8 @@ alignments that match certain criteria.
 The
 .BR -x ,
 .BR -B ,
-.BR -s ,
 and
-.B -Q
+.B -s
 options modify the data which is contained in each alignment.
 
 Finally, the
@@ -286,9 +287,6 @@ Collapse the backward CIGAR operation.
 .BI "-s " FLOAT
 Integer part is used to seed the random number generator [0]. Part after the
 decimal point sets the fraction of templates/pairs to subsample [no subsampling].
-.TP
-.BI "-Q " INT
-Scale quality values in output by INT [1]
 .TP
 .BI "-@ " INT
 Number of BAM compression threads to use in addition to main thread [0].
@@ -654,7 +652,12 @@ option).
 .RS
 .TP 11
 .BI "-l " INT
-Set the compression level, from 0 to 9, for the final output file.
+Set the desired compression level for the final output file, ranging from 0
+(uncompressed) or 1 (fastest but minimal compression) to 9 (best compression
+but slowest to write), similarly to
+.BR gzip (1)'s
+compression level setting.
+.IP
 If
 .B -l
 is not used, the default compression level will apply.
@@ -869,19 +872,38 @@ format.
 
 .TP
 .B fixmate
-samtools fixmate [-rp] <in.nameSrt.bam> <out.bam>
+.na
+samtools fixmate
+.RB [ -rpc ]
+.RB [ -O
+.IR format ]
+.I in.nameSrt.bam out.bam
+.ad
 
 Fill in mate coordinates, ISIZE and mate related flags from a
 name-sorted alignment.
 
 .B OPTIONS:
 .RS
-.TP 8
+.TP 11
 .B -r
 Remove secondary and unmapped reads.
-.TP 8
+.TP
 .B -p
 Disable FR proper pair check.
+.TP
+.B -c
+Add template cigar ct tag.
+.TP
+.BI "-O " FORMAT
+Write the final output as
+.BR sam ", " bam ", or " cram .
+
+By default, samtools tries to select a format based on the output
+filename extension; if output is to standard output or no format can be
+deduced,
+.B -O
+must be used.
 .RE
 
 .TP

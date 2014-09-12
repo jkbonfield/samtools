@@ -26,7 +26,6 @@ DEALINGS IN THE SOFTWARE.  */
 #include <stdbool.h>
 #include <stdlib.h>
 #include <ctype.h>
-#include <assert.h>
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -1090,7 +1089,7 @@ static int sort_usage(FILE *fp, int status)
     fprintf(fp,
 "Usage: samtools sort [options...] [in.bam]\n"
 "Options:\n"
-"  -l INT     Set compression level, from 0 to 9 [-1]\n"
+"  -l INT     Set compression level, from 0 (uncompressed) to 9 (best)\n"
 "  -m INT     Set maximum memory per thread; suffix K/M/G recognized [768M]\n"
 "  -n         Sort by read name\n"
 "  -o FILE    Write final output to FILE rather than standard output\n"
