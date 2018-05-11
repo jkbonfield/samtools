@@ -2220,8 +2220,6 @@ int bam_sort_core_ext(int is_by_qname, char* sort_by_tag, const char *fn, const 
         // or the pointer to the sort tag if applicable
         if (g_is_by_tag) {
             buf[k].u.tag = bam_aux_get(buf[k].bam_record, g_sort_tag);
-        } else if (g_is_by_qname) {
-            buf[k].u.tag = NULL;
         } else {
             buf[k].u.tag = NULL;
         }
