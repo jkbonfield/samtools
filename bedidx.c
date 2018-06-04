@@ -33,8 +33,14 @@ DEALINGS IN THE SOFTWARE.  */
 #include <zlib.h>
 #include "bedidx.h"
 
+typedef struct {
+    int64_t beg, end;
+} bed_be;
+
 #include "htslib/ksort.h"
-KSORT_INIT_GENERIC(uint64_t)
+#define ks_lt_bed_pe(a, b) ((a).beg < (b).beg ? 1 : ((a).beg > (b).beg ? 0 : ( (a).end < (b).end )))
+
+KSORT_INIT(bed_be, bed_be, ks_lt_bed_pe)
 
 #include "htslib/kseq.h"
 KSTREAM_INIT(gzFile, gzread, 8192)
@@ -53,7 +59,7 @@ KSTREAM_INIT(gzFile, gzread, 8192)
  */
 typedef struct {
     int n, m;
-    uint64_t *a;
+    bed_be *a;
     int *idx;
     int filter;
 } bed_reglist_t;
@@ -84,8 +90,8 @@ static void bed_print(void *reg_hash) {
             if ((p = &kh_val(h,k)) != NULL && p->n > 0) {
                 printf("Filter: %d\n", p->filter);
                 for (i=0; i<p->n; i++) {
-                    beg = (uint32_t)(p->a[i]>>32);
-                    end = (uint32_t)(p->a[i]);
+                    beg = p->a[i].beg;
+                    end = p->a[i].end;
 
                     printf("\tinterval[%d]: %d-%d\n",i,beg,end);
                 }
@@ -97,13 +103,13 @@ static void bed_print(void *reg_hash) {
 }
 #endif
 
-static int *bed_index_core(int n, uint64_t *a)
+static int *bed_index_core(int n, bed_be *a)
 {
     int i, j, l, *idx;
     l = 0; idx = 0;
     for (i = 0; i < n; ++i) {
         int beg, end;
-        beg = a[i]>>32 >> LIDX_SHIFT; end = ((uint32_t)a[i]) >> LIDX_SHIFT;
+        beg = a[i].beg >> LIDX_SHIFT; end = a[i].end >> LIDX_SHIFT;
         if (l < end + 1) {
             int old_l = l;
             l = end + 1;
@@ -131,7 +137,7 @@ static void bed_index(void *_h)
         if (kh_exist(h, k)) {
             bed_reglist_t *p = &kh_val(h, k);
             if (p->idx) free(p->idx);
-            ks_introsort(uint64_t, p->n, p->a);
+            ks_introsort(bed_be, p->n, p->a);
             p->idx = bed_index_core(p->n, p->a);
         }
     }
@@ -163,14 +169,14 @@ static int bed_overlap_core(const bed_reglist_t *p, int beg, int end)
     min_off = bed_minoff(p, beg, end);
 
     for (i = min_off; i < p->n; ++i) {
-        if ((int)(p->a[i]>>32) >= end) break; // out of range; no need to proceed
-        if ((int32_t)p->a[i] > beg && (int32_t)(p->a[i]>>32) < end)
+        if (p->a[i].beg >= end) break; // out of range; no need to proceed
+        if (p->a[i].end > beg && p->a[i].beg < end)
             return 1; // find the overlap; return
     }
     return 0;
 }
 
-int bed_overlap(const void *_h, const char *chr, int beg, int end)
+int bed_overlap(const void *_h, const char *chr, int64_t beg, int64_t end)
 {
     const reghash_t *h = (const reghash_t*)_h;
     khint_t k;
@@ -202,11 +208,11 @@ void bed_unify(void *reg_hash) {
             continue;
 
         for (new_n = 0, j = 1; j < p->n; j++) {
-            if ((uint32_t)p->a[new_n] < (uint32_t)(p->a[j]>>32)) {
+            if (p->a[new_n].end < p->a[j].beg) {
                 p->a[++new_n] = p->a[j];
             } else {
-                if ((uint32_t)p->a[new_n] < (uint32_t)p->a[j])
-                    p->a[new_n] = (p->a[new_n] & 0xFFFFFFFF00000000) | (uint32_t)(p->a[j]);
+                if (p->a[new_n].end < p->a[j].end)
+                    p->a[new_n].end = p->a[j].end;
             }
         }
 
@@ -309,10 +315,12 @@ void *bed_read(const char *fn)
         // Add begin,end to the list
         if (p->n == p->m) {
             p->m = p->m ? p->m<<1 : 4;
-            p->a = realloc(p->a, p->m * sizeof(uint64_t));
+            p->a = realloc(p->a, p->m * sizeof(*p->a ));
             if (NULL == p->a) goto fail;
         }
-        p->a[p->n++] = (uint64_t)beg<<32 | end;
+        p->a[p->n].beg = beg;
+        p->a[p->n].end = end;
+        p->n++;
     }
     // FIXME: Need to check for errors in ks_getuntil.  At the moment it
     // doesn't look like it can return one.  Possibly use gzgets instead?
@@ -352,7 +360,7 @@ void bed_destroy(void *_h)
     kh_destroy(reg, h);
 }
 
-static void *bed_insert(void *reg_hash, char *reg, unsigned int beg, unsigned int end) {
+static void *bed_insert(void *reg_hash, char *reg, int64_t beg, int64_t end) {
 
     reghash_t *h;
     khint_t k;
@@ -381,10 +389,12 @@ static void *bed_insert(void *reg_hash, char *reg, unsigned int beg, unsigned in
     // Add beg and end to the list
     if (p->n == p->m) {
         p->m = p->m ? p->m<<1 : 4;
-        p->a = realloc(p->a, p->m * sizeof(uint64_t));
+        p->a = realloc(p->a, p->m * sizeof(*p->a));
         if (NULL == p->a) goto fail;
     }
-    p->a[p->n++] = (uint64_t)beg<<32 | end;
+    p->a[p->n].beg = beg;
+    p->a[p->n].end = end;
+    p->n++;
 
 fail:
     return h;
@@ -404,7 +414,7 @@ static void *bed_filter(void *reg_hash, void *tmp_hash) {
     reghash_t *t;
     bed_reglist_t *p, *q;
     khint_t l, k;
-    uint64_t *new_a;
+    bed_be *new_a;
     int i, j, new_n, min_off;
     const char *reg;
     uint32_t beg, end;
@@ -425,20 +435,22 @@ static void *bed_filter(void *reg_hash, void *tmp_hash) {
         if (k == kh_end(h) || !(p = &kh_val(h, k)) || !(p->n))
             continue;
 
-        new_a = (uint64_t *)calloc(q->n + p->n, sizeof(uint64_t));
+        new_a = (bed_be *)calloc(q->n + p->n, sizeof(*new_a));
         if (!new_a)
             return NULL;
         new_n = 0;
 
         for (i = 0; i < q->n; i++) {
-            beg = (uint32_t)(q->a[i]>>32);
-            end = (uint32_t)(q->a[i]);
+            beg = q->a[i].beg;
+            end = q->a[i].end;
 
             min_off = bed_minoff(p, beg, end);
             for (j = min_off; j < p->n; ++j) {
-                if ((uint32_t)(p->a[j]>>32) >= end) break; // out of range; no need to proceed
-                if ((uint32_t)(p->a[j]) > beg && (uint32_t)(p->a[j]>>32) < end) {
-                    new_a[new_n++] = ((uint64_t)MAX((uint32_t)(p->a[j]>>32), beg) << 32) | MIN((uint32_t)p->a[j], end);
+                if (p->a[j].beg >= end) break; // out of range; no need to proceed
+                if (p->a[j].end > beg && p->a[j].beg < end) {
+                    new_a[new_n].beg = MAX(p->a[j].beg, beg);
+                    new_a[new_n].end = MIN(p->a[j].end, end);
+                    new_n++;
                 }
             }
         }
@@ -466,7 +478,7 @@ void *bed_hash_regions(void *reg_hash, char **regs, int first, int last, int *op
     int i;
     char reg[1024];
     const char *q;
-    int beg, end;
+    int64_t beg, end;
 
     if (h) {
         t = kh_init(reg);
@@ -485,7 +497,7 @@ void *bed_hash_regions(void *reg_hash, char **regs, int first, int last, int *op
 
     for (i=first; i<last; i++) {
 
-        q = hts_parse_reg(regs[i], &beg, &end);
+        q = hts_parse_reg64(regs[i], &beg, &end);
         if (q) {
             if ((int)(q - regs[i] + 1) > 1024) {
                 fprintf(stderr, "Region name '%s' is too long (bigger than %d).\n", regs[i], 1024);
@@ -587,8 +599,8 @@ hts_reglist_t *bed_reglist(void *reg_hash, int filter, int *n_reg) {
         reglist[count].max_end = 0;
 
         for (j = 0; j < p->n; j++) {
-            reglist[count].intervals[j].beg = (uint32_t)(p->a[j]>>32);
-            reglist[count].intervals[j].end = (uint32_t)(p->a[j]);
+            reglist[count].intervals[j].beg = p->a[j].beg;
+            reglist[count].intervals[j].end = p->a[j].end;
 
             if (reglist[count].intervals[j].end > reglist[count].max_end)
                 reglist[count].max_end = reglist[count].intervals[j].end;
