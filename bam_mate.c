@@ -314,7 +314,7 @@ static int bam_mating_core(samFile *in, samFile *out, int remove_reads, int prop
                 if (pre->core.tid == cur->core.tid && !(cur->core.flag&(BAM_FUNMAP|BAM_FMUNMAP))
                     && !(pre->core.flag&(BAM_FUNMAP|BAM_FMUNMAP))) // if safe set TLEN/ISIZE
                 {
-                    uint64_t cur5, pre5;
+                    hts_pos_t cur5, pre5;
                     cur5 = (cur->core.flag&BAM_FREVERSE)? cur_end : cur->core.pos;
                     pre5 = (pre->core.flag&BAM_FREVERSE)? pre_end : pre->core.pos;
                     cur->core.isize = pre5 - cur5; pre->core.isize = cur5 - pre5;

@@ -34,7 +34,7 @@ DEALINGS IN THE SOFTWARE.  */
 #include "bedidx.h"
 
 typedef struct {
-    int64_t beg, end;
+    hts_pos_t beg, end;
 } bed_be;
 
 #include "htslib/ksort.h"
@@ -176,7 +176,7 @@ static int bed_overlap_core(const bed_reglist_t *p, int beg, int end)
     return 0;
 }
 
-int bed_overlap(const void *_h, const char *chr, int64_t beg, int64_t end)
+int bed_overlap(const void *_h, const char *chr, hts_pos_t beg, hts_pos_t end)
 {
     const reghash_t *h = (const reghash_t*)_h;
     khint_t k;
@@ -360,7 +360,7 @@ void bed_destroy(void *_h)
     kh_destroy(reg, h);
 }
 
-static void *bed_insert(void *reg_hash, char *reg, int64_t beg, int64_t end) {
+static void *bed_insert(void *reg_hash, char *reg, hts_pos_t beg, hts_pos_t end) {
 
     reghash_t *h;
     khint_t k;
@@ -478,7 +478,7 @@ void *bed_hash_regions(void *reg_hash, char **regs, int first, int last, int *op
     int i;
     char reg[1024];
     const char *q;
-    int64_t beg, end;
+    hts_pos_t beg, end;
 
     if (h) {
         t = kh_init(reg);

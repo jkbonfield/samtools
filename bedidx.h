@@ -12,7 +12,7 @@
 
 void *bed_read(const char *fn);
 void bed_destroy(void *_h);
-int bed_overlap(const void *_h, const char *chr, int64_t beg, int64_t end);
+int bed_overlap(const void *_h, const char *chr, hts_pos_t beg, hts_pos_t end);
 void *bed_hash_regions(void *reg_hash, char **regs, int first, int last, int *op);
 const char* bed_get(void *reg_hash, int index, int filter);
 hts_reglist_t *bed_reglist(void *reg_hash, int filter, int *count_regs);

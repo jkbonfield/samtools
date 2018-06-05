@@ -60,7 +60,7 @@ static inline int printw(int c, FILE *fp)
     return 0;
 }
 
-static inline void pileup_seq(FILE *fp, const bam_pileup1_t *p, int64_t pos, int64_t ref_len, const char *ref)
+static inline void pileup_seq(FILE *fp, const bam_pileup1_t *p, hts_pos_t pos, hts_pos_t ref_len, const char *ref)
 {
     int j;
     if (p->is_head) {
@@ -136,7 +136,7 @@ typedef struct {
 typedef struct {
     char *ref[2];
     int ref_id[2];
-    int64_t ref_len[2];
+    hts_pos_t ref_len[2];
 } mplp_ref_t;
 
 #define MPLP_REF_INIT {{NULL,NULL},{-1,-1},{0,0}}
@@ -155,7 +155,7 @@ typedef struct {
     bam_pileup1_t **plp;
 } mplp_pileup_t;
 
-static int mplp_get_ref(mplp_aux_t *ma, int tid,  char **ref, int64_t *ref_len) {
+static int mplp_get_ref(mplp_aux_t *ma, int tid,  char **ref, hts_pos_t *ref_len) {
     mplp_ref_t *r = ma->ref;
 
     //printf("get ref %d {%d/%p, %d/%p}\n", tid, r->ref_id[0], r->ref[0], r->ref_id[1], r->ref[1]);
@@ -177,7 +177,7 @@ static int mplp_get_ref(mplp_aux_t *ma, int tid,  char **ref, int64_t *ref_len) 
         // Last, swap over
         int tmp;
         tmp = r->ref_id[0];  r->ref_id[0]  = r->ref_id[1];  r->ref_id[1]  = tmp;
-        int64_t tmp64;
+        hts_pos_t tmp64;
         tmp64 = r->ref_len[0]; r->ref_len[0] = r->ref_len[1]; r->ref_len[1] = tmp64;
 
         char *tc;
@@ -197,7 +197,7 @@ static int mplp_get_ref(mplp_aux_t *ma, int tid,  char **ref, int64_t *ref_len) 
     r->ref[0] = faidx_fetch_seq64(ma->conf->fai,
                                   ma->h->target_name[r->ref_id[0]],
                                   0,
-                                  INT64_MAX,
+                                  HTS_POS_MAX,
                                   &r->ref_len[0]);
 
     if (!r->ref[0]) {
@@ -233,7 +233,7 @@ static int mplp_func(void *data, bam1_t *b)
     char *ref;
     mplp_aux_t *ma = (mplp_aux_t*)data;
     int ret, skip = 0;
-    int64_t ref_len;
+    hts_pos_t ref_len;
     do {
         int has_ref;
         ret = ma->iter? sam_itr_next(ma->fp, ma->iter, b) : sam_read1(ma->fp, ma->h, b);
@@ -265,7 +265,7 @@ static int mplp_func(void *data, bam1_t *b)
         if (ma->conf->fai && b->core.tid >= 0) {
             has_ref = mplp_get_ref(ma, b->core.tid, &ref, &ref_len);
             if (has_ref && ref_len <= b->core.pos) { // exclude reads outside of the reference sequence
-                fprintf(stderr,"[%s] Skipping because %"PRId64" is outside of %"PRId64" [ref:%d]\n",
+                fprintf(stderr,"[%s] Skipping because %"PRIhts_pos" is outside of %"PRIhts_pos" [ref:%d]\n",
                         __func__, b->core.pos, ref_len, b->core.tid);
                 skip = 1;
                 continue;
@@ -326,7 +326,7 @@ static int mpileup(mplp_conf_t *conf, int n, char **fn)
     extern void bcf_call_del_rghash(void *rghash);
     mplp_aux_t **data;
     int i, tid, *n_plp, tid0 = 0, max_depth, max_indel_depth;
-    int64_t pos, ref_len, beg0 = 0, end0 = INT64_MAX;
+    hts_pos_t pos, ref_len, beg0 = 0, end0 = HTS_POS_MAX;
 
     const bam_pileup1_t **plp;
     mplp_ref_t mp_ref = MPLP_REF_INIT;
@@ -571,7 +571,7 @@ static int mpileup(mplp_conf_t *conf, int n, char **fn)
     bcf1_t *bcf_rec = bcf_init1();
     int ret;
     int last_tid = -1;
-    int64_t last_pos = -1;
+    hts_pos_t last_pos = -1;
 
     // begin pileup
     while ( (ret=bam_mplp64_auto(iter, &tid, &pos, n_plp, plp)) > 0) {
@@ -635,7 +635,7 @@ static int mpileup(mplp_conf_t *conf, int n, char **fn)
             }
             if (conf->bed && tid >= 0 && !bed_overlap(conf->bed, h->target_name[tid], pos, pos+1)) continue;
 
-            fprintf(pileup_fp, "%s\t%"PRId64"\t%c",
+            fprintf(pileup_fp, "%s\t%"PRIhts_pos"\t%c",
                     h->target_name[tid], pos + 1, (ref && pos < ref_len)? ref[pos] : 'N');
             for (i = 0; i < n; ++i) {
                 int j, cnt;

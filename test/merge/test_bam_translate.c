@@ -35,7 +35,7 @@ DEALINGS IN THE SOFTWARE.  */
 
 void dump_read(bam1_t* b) {
     printf("->core.tid:(%d)\n", b->core.tid);
-    printf("->core.pos:(%"PRId64")\n", b->core.pos);
+    printf("->core.pos:(%"PRIhts_pos")\n", b->core.pos);
     printf("->core.bin:(%d)\n", b->core.bin);
     printf("->core.qual:(%d)\n", b->core.qual);
     printf("->core.l_qname:(%d)\n", b->core.l_qname);
@@ -43,8 +43,8 @@ void dump_read(bam1_t* b) {
     printf("->core.n_cigar:(%d)\n", b->core.n_cigar);
     printf("->core.l_qseq:(%d)\n", b->core.l_qseq);
     printf("->core.mtid:(%d)\n", b->core.mtid);
-    printf("->core.mpos:(%"PRId64")\n", b->core.mpos);
-    printf("->core.isize:(%"PRId64")\n", b->core.isize);
+    printf("->core.mpos:(%"PRIhts_pos")\n", b->core.mpos);
+    printf("->core.isize:(%"PRIhts_pos")\n", b->core.isize);
     if (b->data) {
         printf("->data:");
         int i;
