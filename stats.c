@@ -64,7 +64,8 @@ DEALINGS IN THE SOFTWARE.  */
 
 #define BWA_MIN_RDLEN 35
 #define DEFAULT_CHUNK_NO 8
-#define DEFAULT_PAIR_MAX UINT32_MAX
+//#define DEFAULT_PAIR_MAX UINT32_MAX
+#define DEFAULT_PAIR_MAX 10000
 // From the spec
 // If 0x4 is set, no assumptions can be made about RNAME, POS, CIGAR, MAPQ, bits 0x2, 0x10, 0x100 and 0x800, and the bit 0x20 of the previous read in the template.
 #define IS_PAIRED_AND_MAPPED(bam) (((bam)->core.flag&BAM_FPAIRED) && !((bam)->core.flag&BAM_FUNMAP) && !((bam)->core.flag&BAM_FMUNMAP))
@@ -228,6 +229,8 @@ typedef struct
 
     uint32_t pair_count;          // Number of active pairs in the pairing hash table
     uint32_t target_count;        // Number of bases covered by the target file
+    uint32_t last_pair_tid;
+    uint32_t last_pair_flush;
 }
 stats_t;
 KHASH_MAP_INIT_STR(c2stats, stats_t*)
@@ -852,10 +855,21 @@ static void remove_overlaps(bam1_t *bam_line, khash_t(qn2pair) *read_pairs, stat
         return;
     }
 
-    //cleanup the pair hash table to free memory
-    if ( stats->pair_count > DEFAULT_PAIR_MAX ) {
-        stats->pair_count -= cleanup_overlaps(read_pairs, bam_line->core.pos);
-    }
+//    //cleanup the pair hash table to free memory
+//    stats->last_pair_flush++;
+//    if ( stats->pair_count > DEFAULT_PAIR_MAX && stats->last_pair_flush > DEFAULT_PAIR_MAX) {
+//        fprintf(stderr, "%d:%d\tnew pair count = %d to ", bam_line->core.tid, bam_line->core.pos, stats->pair_count);
+//        stats->pair_count -= cleanup_overlaps(read_pairs, bam_line->core.pos);
+//        stats->last_pair_flush = 0;
+//        fprintf(stderr, "%d\n", stats->pair_count);
+//    }
+//
+//    if ( stats->last_pair_tid != bam_line->core.tid) {
+//        fprintf(stderr, "Clean for chr %d, %p\n", stats->tid, read_pairs);
+//        stats->pair_count -= cleanup_overlaps(read_pairs, INT_MAX-1);
+//        stats->last_pair_tid = bam_line->core.tid;
+//        stats->last_pair_flush = 0;
+//    }
 
     khint_t k = kh_get(qn2pair, read_pairs, qname);
     if ( k == kh_end(read_pairs) ) { //first chunk from this template
@@ -1120,8 +1134,25 @@ void collect_stats(bam1_t *bam_line, stats_t *stats, khash_t(qn2pair) *read_pair
 
     if ( stats->is_sorted )
     {
-        if ( stats->tid==-1 || stats->tid!=bam_line->core.tid )
+        if ( stats->tid==-1 || stats->tid!=bam_line->core.tid ) {
             round_buffer_flush(stats, -1);
+        }
+
+        //cleanup the pair hash table to free memory
+        stats->last_pair_flush++;
+        if ( stats->pair_count > DEFAULT_PAIR_MAX && stats->last_pair_flush > DEFAULT_PAIR_MAX) {
+            fprintf(stderr, "%d:%d\tnew pair count = %d to ", bam_line->core.tid, bam_line->core.pos, stats->pair_count);
+            stats->pair_count -= cleanup_overlaps(read_pairs, bam_line->core.pos);
+            stats->last_pair_flush = 0;
+            fprintf(stderr, "%d\n", stats->pair_count);
+        }
+
+        if ( stats->last_pair_tid != bam_line->core.tid) {
+            fprintf(stderr, "Clean for chr %d, %p\n", stats->tid, read_pairs);
+            stats->pair_count -= cleanup_overlaps(read_pairs, INT_MAX-1);
+            stats->last_pair_tid = bam_line->core.tid;
+            stats->last_pair_flush = 0;
+        }
 
         // Mismatches per cycle and GC-depth graph. For simplicity, reads overlapping GCD bins
         //  are not splitted which results in up to seq_len-1 overlaps. The default bin size is
@@ -1667,7 +1698,8 @@ int is_in_regions(bam1_t *bam_line, stats_t *stats)
     int i = reg->cpos;
     while ( i<reg->npos && reg->pos[i].to<=bam_line->core.pos ) i++;
     if ( i>=reg->npos ) { reg->cpos = reg->npos; return 0; }
-    if ( bam_endpos(bam_line) < reg->pos[i].from ) return 0;
+    int64_t endpos = bam_endpos(bam_line);
+    if ( endpos < reg->pos[i].from ) return 0;
 
     //found a read overlapping a region
     reg->cpos = i;
@@ -1677,8 +1709,7 @@ int is_in_regions(bam1_t *bam_line, stats_t *stats)
     //now find all the overlapping chunks
     stats->nchunks = 0;
     while (i < reg->npos) {
-        if (bam_line->core.pos < reg->pos[i].to && bam_endpos(bam_line) >= reg->pos[i].from) {
-            int32_t endpos = bam_endpos(bam_line);
+        if (bam_line->core.pos < reg->pos[i].to && endpos >= reg->pos[i].from) {
             stats->chunks[stats->nchunks].from = MAX(bam_line->core.pos+1, reg->pos[i].from);
             stats->chunks[stats->nchunks].to = MIN(endpos, reg->pos[i].to);
             stats->nchunks++;
@@ -1925,6 +1956,8 @@ stats_t* stats_init()
     stats->split_name = NULL;
     stats->nchunks = 0;
     stats->pair_count = 0;
+    stats->last_pair_tid = -2;
+    stats->last_pair_flush = 0;
     stats->target_count = 0; //2948647747;
 
     return stats;
