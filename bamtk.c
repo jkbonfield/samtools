@@ -66,6 +66,7 @@ int dict_main(int argc, char *argv[]);
 int fqidx_main(int argc, char *argv[]);
 int amplicon_clip_main(int argc, char *argv[]);
 int main_ampliconstats(int argc, char *argv[]);
+int main_consensus(int argc, char *argv[]);
 
 const char *samtools_version()
 {
@@ -102,6 +103,7 @@ static void usage(FILE *fp)
 "  -- File operations\n"
 "     collate        shuffle and group alignments by name\n"
 "     cat            concatenate BAMs\n"
+"     consensus      produce a consensus Pileup/FASTA/FASTQ\n"
 "     merge          merge sorted alignments\n"
 "     mpileup        multi-way pileup\n"
 "     sort           sort alignment file\n"
@@ -210,6 +212,7 @@ int main(int argc, char *argv[])
     }
     else if (strcmp(argv[1], "tview") == 0)   ret = bam_tview_main(argc-1, argv+1);
     else if (strcmp(argv[1], "ampliconstats") == 0)     ret = main_ampliconstats(argc-1, argv+1);
+    else if (strcmp(argv[1], "consensus") == 0) ret = main_consensus(argc-1, argv+1);
     else if (strcmp(argv[1], "--version") == 0) {
         printf(
 "samtools %s\n"
