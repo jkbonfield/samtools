@@ -1,3 +1,9 @@
+// FIXME: also use strand to spot possible basecalling errors.
+
+// Eg 50T 20A seems T/A het,
+// but 30T+ 20T- 18A+ 2A- seems like a consistent A miscall on one strand
+// only, while T is spread evenly across both strands.
+
 /*  bam_consensus.c -- consensus subcommand.
 
     Copyright (C) 1998-2001,2003 Medical Research Council (Gap4/5 source)
@@ -51,6 +57,7 @@ typedef struct {
     hts_itr_t *iter;
     char *reg;
     int use_qual;
+    int use_mqual;
     int min_depth;
     double call_fract;
     double het_fract;
@@ -81,6 +88,12 @@ static int readaln(void *data, bam1_t *b) {
 
 #define CONS_MQUAL      16
 
+// Make these a parameter, but capping mqual seems wise as it's
+// not so robust especially at the low end when real SNPs exist,
+// but reduce mqual for many algorithms.
+#define MIN_MQUAL       10
+#define MAX_MQUAL       50
+
 typedef struct {
     /* the most likely base call - we never call N here */
     /* A=0, C=1, G=2, T=3, *=4 */
@@ -110,6 +123,10 @@ typedef struct {
 #define TENLOG2OVERLOG10 3.0103
 
 
+// FIXME: not known at present.
+// Best to externalise these with parameters?  Ideally would be
+// param per read-group though.
+
 /* Sequencing technologies for seq_t.seq_tech; 5 bits, so max=31 */
 #define STECH_UNKNOWN    0
 #define STECH_SANGER     1
@@ -122,6 +139,11 @@ typedef struct {
 #define STECH_ONT        8
 #define STECH_LAST       8 // highest value
 
+// Undercall rates govern the alignment pad (deletion) vs missing observation
+// (undercall).  Single molecule techniques may miss data, but we don't want
+// to start labelling lots of places as being base/gap het calls.
+//
+// NB: Figures are pure guesses, and also unused! (forced to illumina atm)
 double tech_undercall[] = {
     1.00, // unknown
     1.00, // sanger
@@ -131,7 +153,7 @@ double tech_undercall[] = {
     1.00, // helicos
     1.00, // iontorrent
     1.00, // pacbio
-    1.63, // ont
+    1.20, // ont
 };
 
 #ifdef __GNUC__
@@ -191,7 +213,8 @@ static double e_log[501]     ALIGNED(16);
  * In calculation terms, the _M is half __ and half MM, similarly o_ and um.
  *
  * Relative weights of substitution vs overcall vs undercall are governed on a
- * per base basis using the P_OVER and P_UNDER scores (subst is 1-P_OVER-P_UNDER).
+ * per base basis using the P_OVER and P_UNDER scores (subst is
+ * 1-P_OVER-P_UNDER).
  *
  * The heterozygosity weight though is a per column calculation as we're
  * trying to model whether the column is pure or mixed. Hence this is done
@@ -276,7 +299,9 @@ static inline double fast_exp(double y) {
     return e_tab[(int)y];
 }
 
-/*Taylor (deg 3) implementation of the log: http://www.flipcode.com/cgi-bin/fcarticles.cgi?show=63828*/
+/* Taylor (deg 3) implementation of the log:
+ * http://www.flipcode.com/cgi-bin/fcarticles.cgi?show=63828
+ */
 static inline double fast_log2(double val)
 {
    register int64_t *const     exp_ptr = ((int64_t*)&val);
@@ -304,10 +329,10 @@ static inline double fast_log (double val) {
 /*
  * As per calculate_consensus_bit_het but for a single pileup column.
  */
-int calculate_consensus_pileup(int flags,
-                               const bam_pileup1_t *p,
-                               int np,
-                               consensus_t *cons) {
+int calculate_consensus_gap5(int flags,
+                             const bam_pileup1_t *p,
+                             int np,
+                             consensus_t *cons) {
     int i, j;
     static int init_done =0;
     static double q2p[101], mqual_pow[256];
@@ -341,8 +366,9 @@ int calculate_consensus_pileup(int flags,
 
         for (i = 0; i < 255; i++) {
             //mqual_pow[i] = 1-pow(10, -(i+.01)/10.0);
+            mqual_pow[i] = 1-pow(10, -(i*.9)/10.0);
             //mqual_pow[i] = 1-pow(10, -(i/3+.1)/10.0);
-            mqual_pow[i] = 1-pow(10, -(i/2+.05)/10.0);
+            //mqual_pow[i] = 1-pow(10, -(i/2+.05)/10.0);
         }
         // unknown mqual
         mqual_pow[255] = mqual_pow[10];
@@ -384,11 +410,18 @@ int calculate_consensus_pileup(int flags,
         // hamming distance to next best location.)
 
         if (flags & CONS_MQUAL) {
-            double _p = mqual_pow[qual];
-            double _m = mqual_pow[b->core.qual];
+            double _p = 1-q2p[qual];
+            int mqual = b->core.qual;
+            if (mqual < MIN_MQUAL)
+                mqual = MIN_MQUAL;
+            if (mqual > MAX_MQUAL)
+                mqual = MAX_MQUAL;
+            //double _m = mqual_pow[mqual];
+            double _m = 1-q2p[mqual];
 
             //printf("%c %d -> %d, %f %f\n", "ACGT*N"[base], qual, (int)(-TENOVERLOG10 * log(1-(_m * _p + (1 - _m)/4))), _p, _m);
             qual = ph_log(1-(_m * _p + (1 - _m)/4));
+            //qual = ph_log(1-_p*_m);
         }
 
         /* Quality 0 should never be permitted as it breaks the math */
@@ -472,7 +505,7 @@ int calculate_consensus_pileup(int flags,
                 continue;
             }
 
-    if (max < S[j]) {
+            if (max < S[j]) {
                 max = S[j];
                 call = j;
             }
@@ -582,8 +615,8 @@ int calculate_consensus_pileup(int flags,
  * code of lower-case base (otherwise it is uppercase).
  */
 
-static int consensus(const bam_pileup1_t *plp, int nplp,
-                     consensus_opts *opts, int *qual) {
+static int calculate_consensus_simple(const bam_pileup1_t *plp, int nplp,
+                                      consensus_opts *opts, int *qual) {
     int i, min_qual = 0;
 
     // Ignore ambiguous bases in seq for now, so we don't treat R, Y, etc
@@ -685,7 +718,10 @@ void consensus_pileup(consensus_opts *opts, const bam_pileup1_t *p,
     int cq, cb;
     if (opts->gap5) {
         consensus_t cons;
-        calculate_consensus_pileup(CONS_ALL, p, np, &cons);
+        if (opts->use_mqual)
+            calculate_consensus_gap5(CONS_ALL | CONS_MQUAL, p, np, &cons);
+        else
+            calculate_consensus_gap5(CONS_ALL, p, np, &cons);
         if (cons.het_phred > 0) {
             cb = "AMRWa" // 5x5 matrix with ACGT* per row / col
                  "MCSYc" 
@@ -698,7 +734,7 @@ void consensus_pileup(consensus_opts *opts, const bam_pileup1_t *p,
             cq = cons.phred;
         }
     } else {
-        cb = consensus(p, np, opts, &cq);
+        cb = calculate_consensus_simple(p, np, opts, &cq);
     }
 
     printf("%s\t%d\t%c\t%d\t",
@@ -744,6 +780,7 @@ int main_consensus(int argc, char **argv) {
 
     consensus_opts opts = {
         .use_qual   = 0,
+        .use_mqual  = 0,
         .min_depth  = 20,
         .call_fract = 0.75,
         .het_fract  = 0.66,
@@ -753,6 +790,7 @@ int main_consensus(int argc, char **argv) {
     static const struct option lopts[] = {
         SAM_OPT_GLOBAL_OPTIONS('-', 0, 'O', '-', '-', '@'),
         {"use-qual",   no_argument,       NULL, 'q'},
+        {"use-mqual",  no_argument,       NULL, 'm'},
         {"min-depth",  required_argument, NULL, 'd'},
         {"call-fract", required_argument, NULL, 'c'},
         {"het-fract",  required_argument, NULL, 'H'},
@@ -760,9 +798,10 @@ int main_consensus(int argc, char **argv) {
         {NULL, 0, NULL, 0}
     };
 
-    while ((c = getopt_long(argc, argv, "@:qd:c:H:r:5", lopts, NULL)) >= 0) {
+    while ((c = getopt_long(argc, argv, "@:qmd:c:H:r:5", lopts, NULL)) >= 0) {
         switch (c) {
         case 'q': opts.use_qual=1; break;
+        case 'm': opts.use_mqual=1; break;
         case 'd': opts.min_depth = atoi(optarg); break;
         case 'c': opts.call_fract = atof(optarg); break;
         case 'H': opts.het_fract = atof(optarg); break;
