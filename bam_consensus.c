@@ -49,6 +49,15 @@ DEALINGS IN THE SOFTWARE.  */
 #include "samtools.h"
 #include "sam_opts.h"
 
+#ifndef MIN
+#  define MIN(a,b) ((a)<(b)?(a):(b))
+#endif
+
+enum format {
+    FASTQ,
+    FASTA,
+    PILEUP
+};
 
 typedef struct {
     samFile *fp;
@@ -62,6 +71,10 @@ typedef struct {
     double call_fract;
     double het_fract;
     int gap5;
+    enum format fmt;
+    int cons_cutoff;
+    int ambig;
+    int line_len;
 } consensus_opts;
 
 static int readaln(void *data, bam1_t *b) {
@@ -107,7 +120,7 @@ typedef struct {
     int het_phred;
 
     /* Single phred style call */
-    unsigned char phred;
+    int phred;
 
     /* Sequence depth */
     int depth;
@@ -544,7 +557,7 @@ int calculate_consensus_gap5(int flags,
             cons->call     = map_sing[call];
             if (norm[call] == 0) norm[call] = DBL_MIN;
             ph = ph_log(norm[call]) + .5;
-            cons->phred = ph > 255 ? 255 : (ph < 0 ? 0 : ph);
+            cons->phred = ph < 0 ? 0 : ph;
             //cons->call_prob1 = norm[call]; // p = 1 - call_prob1
 
             cons->het_call = map_het[het_call];
@@ -672,7 +685,7 @@ static int calculate_consensus_simple(const bam_pileup1_t *plp, int nplp,
     int used_score = score1;
     int used_depth = depth1;
     int used_base  = call1;
-    if (score2 >= opts->het_fract * score1) {
+    if (score2 >= opts->het_fract * score1 && opts->ambig) {
         used_base  |= call2;
         used_score += score1;
         used_depth += depth2;
@@ -711,10 +724,9 @@ extern int pileup_seq(FILE *fp, const bam_pileup1_t *p, hts_pos_t pos,
                       int rev_del, int no_ins, int no_ins_mods,
                       int no_del, int no_ends);
 
-void consensus_pileup(consensus_opts *opts, const bam_pileup1_t *p,
-                      int np, int tid, int pos) {
-    kstring_t ks = {0,0};
-
+int consensus_pileup(consensus_opts *opts, const bam_pileup1_t *p,
+                     int np, int tid, int pos,
+                     kstring_t *seq, kstring_t *qual) {
     int cq, cb;
     if (opts->gap5) {
         consensus_t cons;
@@ -722,43 +734,91 @@ void consensus_pileup(consensus_opts *opts, const bam_pileup1_t *p,
             calculate_consensus_gap5(CONS_ALL | CONS_MQUAL, p, np, &cons);
         else
             calculate_consensus_gap5(CONS_ALL, p, np, &cons);
-        if (cons.het_phred > 0) {
+        if (cons.het_phred > 0 && opts->ambig) {
             cb = "AMRWa" // 5x5 matrix with ACGT* per row / col
                  "MCSYc" 
                  "RSGKg"
                  "WYKTt"
                  "acgt*"[cons.het_call];
-            cq = cons.het_phred > 255 ? 255 : cons.het_phred;
+            cq = cons.het_phred;
         } else {
             cb = "ACGT*"[cons.call];
             cq = cons.phred;
+        }
+        if (cq < opts->cons_cutoff) {
+            cb = 'N';
+            cq = 0;
         }
     } else {
         cb = calculate_consensus_simple(p, np, opts, &cq);
     }
 
-    printf("%s\t%d\t%c\t%d\t",
-           sam_hdr_tid2name(opts->h, tid), pos, cb, cq);
+    if (seq) {
+        kputc(cb, seq);
+        kputc(MIN(cq, '~'-'!')+'!', qual);
+    }
 
-    int j;
-    for (j = 0; j < np; j++)
-        pileup_seq(stdout, p+j, pos, 0, NULL, &ks, 0, 2, 1, 2, 1);
-    putchar('\n');
+    if (opts->fmt == PILEUP) {
+        kstring_t ks = {0,0};
+        int j;
+
+        printf("%s\t%d\t%c\t%d\t",
+               sam_hdr_tid2name(opts->h, tid), pos, cb, cq);
+
+        for (j = 0; j < np; j++)
+            pileup_seq(stdout, p+j, pos, 0, NULL, &ks, 0, 2, 1, 2, 1);
+        putchar('\n');
+
+        free(ks.s); // FIXME: reuse this
+    }
+
+    return 0;
+}
+
+static void dump_fastq(const char *name,
+                       const char *seq, size_t seq_l,
+                       const char *qual, size_t qual_l,
+                       enum format fmt,
+                       int line_len) {
+    printf("%c%s\n", ">@"[fmt==FASTQ], name);
+    size_t i;
+    for (i = 0; i < seq_l; i += line_len)
+        printf("%.*s\n", (int)MIN(line_len, seq_l - i), seq+i);
+
+    if (fmt == FASTQ) {
+        printf("+\n");
+        for (i = 0; i < seq_l; i += line_len)
+            printf("%.*s\n", (int)MIN(line_len, seq_l - i), qual+i);
+    }
 }
 
 // Iterate over the pileup
 static int consensus_loop(consensus_opts *opts) {
     bam_plp_t iter;
     const bam_pileup1_t *p;
-    int tid, pos, n;
+    int tid, pos, n, last_tid = -99;
+    kstring_t seq = {0}, qual = {0};
 
     iter = bam_plp_init(readaln, (void *)opts);
     while ((p = bam_plp_auto(iter, &tid, &pos, &n)) != 0) {
         if (opts->iter && (pos <= opts->iter->beg || pos > opts->iter->end))
             continue;
-        consensus_pileup(opts, p, n, tid, pos);
+        if (tid != last_tid) {
+            if (last_tid >= 0 && opts->fmt != PILEUP)
+                dump_fastq(sam_hdr_tid2name(opts->h, last_tid),
+                           seq.s, seq.l, qual.s, qual.l, opts->fmt,
+                           opts->line_len);
+            seq.l = 0; qual.l = 0;
+            last_tid = tid;
+        }
+        consensus_pileup(opts, p, n, tid, pos, &seq, &qual);
     }
     bam_plp_destroy(iter);
+
+    if (last_tid >= 0 && opts->fmt != PILEUP)
+        dump_fastq(sam_hdr_tid2name(opts->h, last_tid),
+                   seq.s, seq.l, qual.s, qual.l, opts->fmt,
+                   opts->line_len);
 
     return 0;
 }
@@ -767,10 +827,20 @@ static void usage_exit(FILE *fp, int exit_status) {
     fprintf(fp, "Usage: samtools consensus [options] <in.bam>\n");
     fprintf(fp, "\nOptions:\n");
     fprintf(fp, "   -r, --region REG    Limit query to REG. Requires an index\n");
+    fprintf(fp, "   -f, --format FMT    Output in format FASTA, FASTQ or PILEUP [FASTA]\n");
+    fprintf(fp, "   -l, --line-len N    Wrap FASTA/Q at line length N [70]\n");
+    fprintf(fp, "   -5                  Enable the bayesian 'gap5' consensus mode [off]\n");
+    fprintf(fp, "For simple consensus mode:\n");
     fprintf(fp, "   -q, --use-qual      Use quality values in calculation\n");
-    fprintf(fp, "   -m, --min-depth D   Minimum depth of D [20]\n");
-    fprintf(fp, "   -m, --call-fract C  At least C portion of bases must agree [0.75]\n");
+    fprintf(fp, "   -d, --min-depth D   Minimum depth of D [20]\n");
+    fprintf(fp, "   -c, --call-fract C  At least C portion of bases must agree [0.75]\n");
     fprintf(fp, "   -m, --het-fract C   Minimum fraction of 2nd-most to most common base [0.66]\n");
+    fprintf(fp, "For gap5 consensus mode:\n");
+    fprintf(fp, "   -C, --cutoff C      Consensus cutoff quality C [20]\n");
+    fprintf(fp, "   -a, --ambig         Enable IUPAC ambiguity codes [off]\n");
+
+    // Plus gap5 vs simple
+    // Plus -F format (fasta/fastq/pileup)
     sam_global_opt_help(fp, "-.---@-.");
     exit(exit_status);
 }
@@ -784,6 +854,10 @@ int main_consensus(int argc, char **argv) {
         .min_depth  = 20,
         .call_fract = 0.75,
         .het_fract  = 0.66,
+        .fmt        = FASTA,
+        .cons_cutoff= 20,
+        .ambig      = 0,
+        .line_len   = 70,
     };
 
     sam_global_args ga = SAM_GLOBAL_ARGS_INIT;
@@ -795,10 +869,15 @@ int main_consensus(int argc, char **argv) {
         {"call-fract", required_argument, NULL, 'c'},
         {"het-fract",  required_argument, NULL, 'H'},
         {"region",     required_argument, NULL, 'r'},
+        {"format",     required_argument, NULL, 'f'},
+        {"cutoff",     required_argument, NULL, 'C'},
+        {"ambig",      no_argument,       NULL, 'a'},
+        {"line-len",   required_argument, NULL, 'l'},
         {NULL, 0, NULL, 0}
     };
 
-    while ((c = getopt_long(argc, argv, "@:qmd:c:H:r:5", lopts, NULL)) >= 0) {
+    while ((c = getopt_long(argc, argv, "@:qmd:c:H:r:5f:C:al:",
+                            lopts, NULL)) >= 0) {
         switch (c) {
         case 'q': opts.use_qual=1; break;
         case 'm': opts.use_mqual=1; break;
@@ -807,6 +886,25 @@ int main_consensus(int argc, char **argv) {
         case 'H': opts.het_fract = atof(optarg); break;
         case 'r': opts.reg = optarg; break;
         case '5': opts.gap5 = 1; break;
+        case 'C': opts.cons_cutoff = atoi(optarg); break;
+        case 'a': opts.ambig = 1; break;
+        case 'l':
+            if ((opts.line_len = atoi(optarg)) <= 0)
+                opts.line_len = INT_MAX;
+            break;
+
+        case 'f':
+            if (strcasecmp(optarg, "fasta") == 0)
+                opts.fmt = FASTA;
+            else if (strcasecmp(optarg, "fastq") == 0)
+                opts.fmt = FASTQ;
+            else if (strcasecmp(optarg, "pileup") == 0)
+                opts.fmt = PILEUP;
+            else {
+                fprintf(stderr, "Unknown format %s\n", optarg);
+                return 1;
+            }
+            break;
 
         default:  if (parse_sam_global_opt(c, optarg, lopts, &ga) == 0) break;
             /* else fall-through */
