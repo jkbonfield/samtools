@@ -75,6 +75,8 @@ typedef struct {
     int cons_cutoff;
     int ambig;
     int line_len;
+    int mods;
+    int default_qual;
 } consensus_opts;
 
 static int readaln(void *data, bam1_t *b) {
@@ -345,7 +347,8 @@ static inline double fast_log (double val) {
 int calculate_consensus_gap5(int flags,
                              const bam_pileup1_t *p,
                              int np,
-                             consensus_t *cons) {
+                             consensus_t *cons,
+                             int default_qual) {
     int i, j;
     static int init_done =0;
     static double q2p[101], mqual_pow[256];
@@ -403,7 +406,10 @@ int calculate_consensus_gap5(int flags,
 
         bam1_t *b = p[n].b;
         uint8_t base = bam_seqi(bam_get_seq(b), p[n].qpos);
-        uint8_t qual = bam_get_qual(b)[p[n].qpos];
+        uint8_t *qual_arr = bam_get_qual(b);
+        uint8_t qual = qual_arr[p[n].qpos];
+        if (qual == 255 || (qual == 0 && *qual_arr == 255))
+            qual = default_qual;
         const int stech = STECH_SOLEXA;
 
         // =ACM GRSV TWYH KDBN
@@ -704,7 +710,7 @@ static int calculate_consensus_simple(const bam_pileup1_t *plp, int nplp,
 
     // Our final call.  "?" shouldn't be possible to generate
     const char *het =
-        "NACMGRSVTWYHKDB?"
+        "NACMGRSVTWYHKDBN"
         "*ac?g???t???????";
 
     //printf("%c %d\n", het[used_base], used_depth);
@@ -725,15 +731,17 @@ extern int pileup_seq(FILE *fp, const bam_pileup1_t *p, hts_pos_t pos,
                       int no_del, int no_ends);
 
 int consensus_pileup(consensus_opts *opts, const bam_pileup1_t *p,
-                     int np, int tid, int pos,
+                     int np, int tid, int pos, int last_pos,
                      kstring_t *seq, kstring_t *qual) {
     int cq, cb;
     if (opts->gap5) {
         consensus_t cons;
         if (opts->use_mqual)
-            calculate_consensus_gap5(CONS_ALL | CONS_MQUAL, p, np, &cons);
+            calculate_consensus_gap5(CONS_ALL | CONS_MQUAL, p, np, &cons,
+                                     opts->default_qual);
         else
-            calculate_consensus_gap5(CONS_ALL, p, np, &cons);
+            calculate_consensus_gap5(CONS_ALL, p, np, &cons,
+                                     opts->default_qual);
         if (cons.het_phred > 0 && opts->ambig) {
             cb = "AMRWa" // 5x5 matrix with ACGT* per row / col
                  "MCSYc" 
@@ -754,6 +762,15 @@ int consensus_pileup(consensus_opts *opts, const bam_pileup1_t *p,
     }
 
     if (seq) {
+        if (pos > last_pos+1) {
+            if (ks_expand(seq, pos - last_pos) < 0 ||
+                ks_expand(qual, pos - last_pos) < 0)
+                return -1;
+            memset(seq->s  + seq->l,  'N', pos - (last_pos+1));
+            memset(qual->s + qual->l, '!', pos - (last_pos+1));
+            seq->l  += pos - (last_pos+1);
+            qual->l += pos - (last_pos+1);
+        }
         kputc(cb, seq);
         kputc(MIN(cq, '~'-'!')+'!', qual);
     }
@@ -798,6 +815,7 @@ static int consensus_loop(consensus_opts *opts) {
     const bam_pileup1_t *p;
     int tid, pos, n, last_tid = -99;
     kstring_t seq = {0}, qual = {0};
+    int last_pos = -1;
 
     iter = bam_plp_init(readaln, (void *)opts);
     while ((p = bam_plp_auto(iter, &tid, &pos, &n)) != 0) {
@@ -810,8 +828,10 @@ static int consensus_loop(consensus_opts *opts) {
                            opts->line_len);
             seq.l = 0; qual.l = 0;
             last_tid = tid;
+            last_pos = -1;
         }
-        consensus_pileup(opts, p, n, tid, pos, &seq, &qual);
+        consensus_pileup(opts, p, n, tid, pos, last_pos, &seq, &qual);
+        last_pos = pos;
     }
     bam_plp_destroy(iter);
 
@@ -826,18 +846,19 @@ static int consensus_loop(consensus_opts *opts) {
 static void usage_exit(FILE *fp, int exit_status) {
     fprintf(fp, "Usage: samtools consensus [options] <in.bam>\n");
     fprintf(fp, "\nOptions:\n");
-    fprintf(fp, "   -r, --region REG    Limit query to REG. Requires an index\n");
-    fprintf(fp, "   -f, --format FMT    Output in format FASTA, FASTQ or PILEUP [FASTA]\n");
-    fprintf(fp, "   -l, --line-len N    Wrap FASTA/Q at line length N [70]\n");
-    fprintf(fp, "   -5                  Enable the bayesian 'gap5' consensus mode [off]\n");
+    fprintf(fp, "  -r, --region REG    Limit query to REG. Requires an index\n");
+    fprintf(fp, "  -f, --format FMT    Output in format FASTA, FASTQ or PILEUP [FASTA]\n");
+    fprintf(fp, "  -l, --line-len N    Wrap FASTA/Q at line length N [70]\n");
+    fprintf(fp, "  -5                  Enable the bayesian 'gap5' consensus mode [off]\n");
     fprintf(fp, "For simple consensus mode:\n");
-    fprintf(fp, "   -q, --use-qual      Use quality values in calculation\n");
-    fprintf(fp, "   -d, --min-depth D   Minimum depth of D [20]\n");
-    fprintf(fp, "   -c, --call-fract C  At least C portion of bases must agree [0.75]\n");
-    fprintf(fp, "   -m, --het-fract C   Minimum fraction of 2nd-most to most common base [0.66]\n");
+    fprintf(fp, "  -q, --use-qual      Use quality values in calculation\n");
+    fprintf(fp, "  -d, --min-depth D   Minimum depth of D [20]\n");
+    fprintf(fp, "  -c, --call-fract C  At least C portion of bases must agree [0.75]\n");
+    fprintf(fp, "  -m, --het-fract C   Minimum fraction of 2nd-most to most common base [0.66]\n");
     fprintf(fp, "For gap5 consensus mode:\n");
-    fprintf(fp, "   -C, --cutoff C      Consensus cutoff quality C [20]\n");
-    fprintf(fp, "   -a, --ambig         Enable IUPAC ambiguity codes [off]\n");
+    fprintf(fp, "  -C, --cutoff C      Consensus cutoff quality C [20]\n");
+    fprintf(fp, "  -a, --ambig         Enable IUPAC ambiguity codes [off]\n");
+    fprintf(fp, "  -M, --output-mods   Also report base modifications [off]\n");
 
     // Plus gap5 vs simple
     // Plus -F format (fasta/fastq/pileup)
@@ -858,25 +879,29 @@ int main_consensus(int argc, char **argv) {
         .cons_cutoff= 20,
         .ambig      = 0,
         .line_len   = 70,
+        .mods       = 0,
+        .default_qual = 10,
     };
 
     sam_global_args ga = SAM_GLOBAL_ARGS_INIT;
     static const struct option lopts[] = {
         SAM_OPT_GLOBAL_OPTIONS('-', 0, 'O', '-', '-', '@'),
-        {"use-qual",   no_argument,       NULL, 'q'},
-        {"use-mqual",  no_argument,       NULL, 'm'},
-        {"min-depth",  required_argument, NULL, 'd'},
-        {"call-fract", required_argument, NULL, 'c'},
-        {"het-fract",  required_argument, NULL, 'H'},
-        {"region",     required_argument, NULL, 'r'},
-        {"format",     required_argument, NULL, 'f'},
-        {"cutoff",     required_argument, NULL, 'C'},
-        {"ambig",      no_argument,       NULL, 'a'},
-        {"line-len",   required_argument, NULL, 'l'},
+        {"use-qual",    no_argument,       NULL, 'q'},
+        {"use-mqual",   no_argument,       NULL, 'm'},
+        {"min-depth",   required_argument, NULL, 'd'},
+        {"call-fract",  required_argument, NULL, 'c'},
+        {"het-fract",   required_argument, NULL, 'H'},
+        {"region",      required_argument, NULL, 'r'},
+        {"format",      required_argument, NULL, 'f'},
+        {"cutoff",      required_argument, NULL, 'C'},
+        {"ambig",       no_argument,       NULL, 'a'},
+        {"line-len",    required_argument, NULL, 'l'},
+        {"output-mods", no_argument,       NULL, 'M'},
+        {"default-qual",required_argument, NULL, 1},
         {NULL, 0, NULL, 0}
     };
 
-    while ((c = getopt_long(argc, argv, "@:qmd:c:H:r:5f:C:al:",
+    while ((c = getopt_long(argc, argv, "@:qmd:c:H:r:5f:C:al:M",
                             lopts, NULL)) >= 0) {
         switch (c) {
         case 'q': opts.use_qual=1; break;
@@ -888,6 +913,8 @@ int main_consensus(int argc, char **argv) {
         case '5': opts.gap5 = 1; break;
         case 'C': opts.cons_cutoff = atoi(optarg); break;
         case 'a': opts.ambig = 1; break;
+        case 'M': opts.mods = 1; break;
+        case 1:   opts.default_qual = atoi(optarg); break;
         case 'l':
             if ((opts.line_len = atoi(optarg)) <= 0)
                 opts.line_len = INT_MAX;
