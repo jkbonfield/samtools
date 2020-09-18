@@ -87,6 +87,19 @@ static int readaln(void *data, bam1_t *b) {
         return sam_read1(dat->fp, dat->h, b);
 }
 
+// Initialise and destroy the base modifier state data. This is called
+// as each new read is added or removed from the pileups.
+int pileup_cd_create(void *data, const bam1_t *b, bam_pileup_cd *cd) {
+    hts_base_mod_state *m = hts_base_mod_state_alloc();
+    bam_parse_basemod(b, m);
+    cd->p = m;
+    return 0;
+}
+
+int pileup_cd_destroy(void *data, const bam1_t *b, bam_pileup_cd *cd) {
+    hts_base_mod_state_free(cd->p);
+    return 0;
+}
 
 /* --------------------------------------------------------------------------
  * A bayesian consensus algorithm that analyses the data to work out
@@ -342,13 +355,35 @@ static inline double fast_log (double val) {
 
 
 /*
+ * In mammals, nearly all C mods are in CG sequences (CpG), with Cs on
+ * both strands being modified: https://en.wikipedia.org/wiki/DNA_methylation
+ *
+ * Initial nanoporetech/megalodon appears to follow this, only ever
+ * emitting CG to mG calls.  Furthermore it looks like 100% of such
+ * occurences are called, but obviously the probability values are
+ * mostly low indicating it believes they're unlikely to be true.
+ *
+ * This poses a problem though, as half the time CG is CG(fwd) and
+ * GC(rev) meaning only half of them can be used for determining
+ * probability of the mod occurring.
+ *
+ * The solution is to filter mods by strand. So if it's C[+m<qual>]
+ * then we count the mods against other fwd strand C only.
+ *
+ * The cases where it may miss a CG and not emit a call are when the
+ * read starts or ends between it.  Ie C$ or g^? in mpileup terms.
+ */
+
+/*
  * As per calculate_consensus_bit_het but for a single pileup column.
  */
+static
 int calculate_consensus_gap5(int flags,
                              const bam_pileup1_t *p,
                              int np,
                              consensus_t *cons,
-                             int default_qual) {
+                             int default_qual,
+                             kstring_t *mod_ks) {
     int i, j;
     static int init_done =0;
     static double q2p[101], mqual_pow[256];
@@ -357,6 +392,22 @@ int calculate_consensus_gap5(int flags,
     double S[15] ALIGNED(16) = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
     double sumsC[6] = {0,0,0,0,0,0}, sumsE = 0;
     int depth = 0;
+
+    /* Base mods.
+     * Two things to consider; modified or not?
+     * If modified, then what is the most likely modification?
+     * We also do this per strand.
+     */
+    int mods_present[257]; // list ending in 0
+    hts_base_mod_state *m = p->cd.p;
+    double M[256];  // type of mod
+    double noM[256];
+    double mod_freq[2][2] = {0}; // [strand][unmod (0) vs mod (1)]
+
+    if (mod_ks && m)
+        mods_present[0] = 0;
+    else
+        m = NULL;
 
     /* Map the 15 possible combinations to 1-base or 2-base encodings */
     static int map_sing[15] ALIGNED(16) =
@@ -489,6 +540,50 @@ int calculate_consensus_gap5(int flags,
         }
 
         depth++;
+
+        // Base modifications.
+        // FIXME: easiest with 2 passes.  One to count list of
+        // possible observations, and one to accumulate probabilities.
+        // Hacky approach for now which assumes all calls get a
+        // probability even if low.
+        if (m) {
+            hts_base_mod mod[256];
+            int nm = bam_mods_at_qpos(b, p[n].qpos, m, mod, 256);
+
+#define MISSING_MOD_P 0.99 // probability to assign to lack of a mod call
+
+            if (nm) {
+                int j, k;
+                double p_tot = 0;
+                for (j = 0; j < nm && j < 256; j++) {
+                    double p = mod[j].qual / 256.0;
+                    p += p_tot;
+                    for (k = 0; k < 256 && M[k]; k++)
+                        if (mods_present[k] == mod[j].modified_base)
+                            break;
+                    if (!mods_present[k]) {
+                        mods_present[k+1] = 0;
+                        mods_present[k] = mod[j].modified_base;
+                        noM[k] = M[k] = 0;
+                    }
+
+                    M[k] += log(p+1e-9);     // use lookup table
+                    noM[k] += log(1-p+1e-9); // use lookup table
+                }
+                // mod[j].modified_base, mod[j].qual
+                mod_freq[b->core.flag & BAM_FREVERSE ? 1 : 0][1]+=p_tot;
+            } else {
+                mod_freq[b->core.flag & BAM_FREVERSE ? 1 : 0][0]+=1;
+            }
+        }
+    }
+
+    if (m) {
+        int k;
+        for (k = 0; mods_present[k]; k++) {
+            double mod_score = exp(M[k]-(log(exp(M[k])+exp(noM[k]))));
+            printf("%c: %f", mods_present[k], mod_score);
+        }
     }
 
 
@@ -733,15 +828,18 @@ extern int pileup_seq(FILE *fp, const bam_pileup1_t *p, hts_pos_t pos,
 int consensus_pileup(consensus_opts *opts, const bam_pileup1_t *p,
                      int np, int tid, int pos, int last_pos,
                      kstring_t *seq, kstring_t *qual) {
+    kstring_t mod_ks = {0, 0};
     int cq, cb;
     if (opts->gap5) {
         consensus_t cons;
         if (opts->use_mqual)
             calculate_consensus_gap5(CONS_ALL | CONS_MQUAL, p, np, &cons,
-                                     opts->default_qual);
+                                     opts->default_qual,
+                                     opts->mods ? &mod_ks : NULL);
         else
             calculate_consensus_gap5(CONS_ALL, p, np, &cons,
-                                     opts->default_qual);
+                                     opts->default_qual,
+                                     opts->mods ? &mod_ks : NULL);
         if (cons.het_phred > 0 && opts->ambig) {
             cb = "AMRWa" // 5x5 matrix with ACGT* per row / col
                  "MCSYc" 
@@ -818,6 +916,12 @@ static int consensus_loop(consensus_opts *opts) {
     int last_pos = -1;
 
     iter = bam_plp_init(readaln, (void *)opts);
+    if (opts->mods) {
+        bam_plp_constructor(iter, pileup_cd_create);
+        bam_plp_destructor(iter, pileup_cd_destroy);
+    }
+
+
     while ((p = bam_plp_auto(iter, &tid, &pos, &n)) != 0) {
         if (opts->iter && (pos <= opts->iter->beg || pos > opts->iter->end))
             continue;
