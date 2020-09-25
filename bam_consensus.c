@@ -137,7 +137,7 @@ typedef struct {
     int het_call;
 
     /* Log-odds for het_call */
-    int het_phred;
+    int het_logodd;
 
     /* Single phred style call */
     int phred;
@@ -696,7 +696,12 @@ int calculate_consensus_gap5(int flags,
 
             cons->call     = map_sing[call];
             if (norm[call] == 0) norm[call] = DBL_MIN;
-            ph = ph_log(norm[call]) + .5;
+            // approximation of phred for when S[call] ~= 1 and norm[call]
+            // is small.  Otherwise we need the full calculation.
+            if (S[call] == 1 && norm[call] < .01)
+                ph = ph_log(norm[call]) + .5;
+            else
+                ph = ph_log(1-S[call]/(norm[call]+S[call])) + .5;
             cons->phred = ph < 0 ? 0 : ph;
             //cons->call_prob1 = norm[call]; // p = 1 - call_prob1
 
@@ -704,7 +709,7 @@ int calculate_consensus_gap5(int flags,
             if (norm[het_call] == 0) norm[het_call] = DBL_MIN;
             ph = TENLOG2OVERLOG10 * (fast_log2(S[het_call]) - fast_log2(norm[het_call])) + .5;
 
-            cons->het_phred = ph;
+            cons->het_logodd = ph;
             //cons->het_prob_n = S[het_call]; // p = prob_n / prob_d
             //cons->het_prob_d = norm[het_call];
 
@@ -712,7 +717,7 @@ int calculate_consensus_gap5(int flags,
             if (flags & CONS_DISCREP) {
                 m = sumsC[0]+sumsC[1]+sumsC[2]+sumsC[3]+sumsC[4];
                 double c;
-                if (cons->het_phred > 0)
+                if (cons->het_logodd > 0)
                     c = sumsC[cons->het_call%5] + sumsC[cons->het_call/5];
                 else
                     c = sumsC[cons->call];;
@@ -725,7 +730,7 @@ int calculate_consensus_gap5(int flags,
         } else {
             cons->call = 5; /* N */
             cons->het_call = 0;
-            cons->het_phred = 0;
+            cons->het_logodd = 0;
             cons->phred = 0;
             cons->depth = 0;
             cons->discrep = 0;
@@ -934,13 +939,13 @@ int consensus_pileup(consensus_opts *opts, const bam_pileup1_t *p,
                                      opts->mod_prob, opts->mod_yes,
                                      opts->mod_no);
         *mod = 0;
-        if (cons.het_phred > 0 && opts->ambig) {
+        if (cons.het_logodd > 0 && opts->ambig) {
             cb = "AMRWa" // 5x5 matrix with ACGT* per row / col
                  "MCSYc" 
                  "RSGKg"
                  "WYKTt"
                  "acgt*"[cons.het_call];
-            cq = cons.het_phred;
+            cq = cons.het_logodd;
         } else {
             cb = "ACGT*"[cons.call];
             cq = cons.phred;
