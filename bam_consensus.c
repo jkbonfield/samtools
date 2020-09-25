@@ -1,5 +1,10 @@
 // FIXME: also use strand to spot possible basecalling errors.
+//        Specifically het calls where mods are predominantly on one
+//        strand.  So maybe require + and - calls and check concordance
+//        before calling a het as confident.  (Still call, but low qual?)
+
 // FIXME: add bedmethyl support
+
 
 // Eg 50T 20A seems T/A het,
 // but 30T+ 20T- 18A+ 2A- seems like a consistent A miscall on one strand
@@ -44,6 +49,7 @@ DEALINGS IN THE SOFTWARE.  */
 #include <math.h>
 #include <limits.h>
 #include <float.h>
+#include <ctype.h>
 
 #include <htslib/sam.h>
 
@@ -82,6 +88,7 @@ typedef struct {
     double mod_prob; // used in computing mod quality; Avg P(call) per event.
     double mod_yes;  // >=Q threshold for asserting mod call to be yes
     double mod_no;   // <=Q threshold for asserting mod call to be no
+    int het_only;
 } consensus_opts;
 
 static int readaln(void *data, bam1_t *b) {
@@ -924,6 +931,8 @@ int consensus_pileup(consensus_opts *opts, const bam_pileup1_t *p,
     kstring_t mod_ks = {0, 0};
     int cq, cb, cm_top = 0, cm_bot = 0, qm_top = 0, qm_bot = 0;
     char mod[10];
+
+    int is_het = 0;
     if (opts->gap5) {
         consensus_t cons;
         if (opts->use_mqual)
@@ -946,7 +955,8 @@ int consensus_pileup(consensus_opts *opts, const bam_pileup1_t *p,
                  "WYKTt"
                  "acgt*"[cons.het_call];
             cq = cons.het_logodd;
-        } else {
+            is_het = 1;
+        } else{
             cb = "ACGT*"[cons.call];
             cq = cons.phred;
 
@@ -1007,6 +1017,8 @@ int consensus_pileup(consensus_opts *opts, const bam_pileup1_t *p,
         kstring_t ks = {0,0};
         int j;
 
+        if (opts->het_only && (!is_het || islower(cb)))
+            return 0;
         printf("%s\t%d\t%c%s\t%d\t",
                sam_hdr_tid2name(opts->h, tid), pos+1, cb, mod, cq);
 
@@ -1119,6 +1131,7 @@ int main_consensus(int argc, char **argv) {
         .min_depth  = 20,
         .call_fract = 0.75,
         .het_fract  = 0.66,
+        .het_only   = 0,
         .fmt        = FASTA,
         .cons_cutoff= 20,
         .ambig      = 0,
@@ -1150,6 +1163,7 @@ int main_consensus(int argc, char **argv) {
         {"mod-no-cutoff",      required_argument, NULL, 3},
         {"mod-fixed-prob",     required_argument, NULL, 4},
         {"mod-cutoff",         required_argument, NULL, 5},
+        {"het-only",           no_argument,       NULL, 6},
         {NULL, 0, NULL, 0}
     };
 
@@ -1171,6 +1185,7 @@ int main_consensus(int argc, char **argv) {
         case 3:   opts.mod_no  = atof(optarg); break;
         case 4:   opts.mod_prob = atof(optarg); break;
         case 5:   opts.mod_cutoff = atoi(optarg); break;
+        case 6:   opts.het_only = 1; break;
         case 'l':
             if ((opts.line_len = atoi(optarg)) <= 0)
                 opts.line_len = INT_MAX;
