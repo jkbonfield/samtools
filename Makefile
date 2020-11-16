@@ -46,7 +46,7 @@ AOBJS=      bam_index.o bam_plcmd.o sam_view.o bam_fastq.o \
             faidx.o dict.o stats.o stats_isize.o bam_flags.o bam_split.o \
             bam_tview.o bam_tview_curses.o bam_tview_html.o bam_lpileup.o \
             bam_quickcheck.o bam_addrprg.o bam_markdup.o tmp_file.o \
-	    bam_ampliconclip.o amplicon_stats.o
+	    bam_ampliconclip.o amplicon_stats.o expr.o
 LZ4OBJS  =  $(LZ4DIR)/lz4.o
 
 prefix      = /usr/local
