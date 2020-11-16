@@ -40,6 +40,7 @@ DEALINGS IN THE SOFTWARE.  */
 #include "samtools.h"
 #include "sam_opts.h"
 #include "bedidx.h"
+#include "expr.h"
 
 KHASH_SET_INIT_STR(str)
 
@@ -130,6 +131,9 @@ static int process_aln(const sam_hdr_t *h, bam1_t *b, samview_settings_t* settin
             }
         }
     }
+    
+    int err = 0;
+    printf("Eval = %d\n", evaluate(NULL, NULL, "17*2+45", &err);
     return 0;
 }
 
