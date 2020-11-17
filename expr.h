@@ -25,7 +25,7 @@ DEALINGS IN THE SOFTWARE.  */
 #ifndef EXPR_H
 #define EXPR_H
 
-typedef int (sym_func)(void *data, char *str, char **end, int *err);
-int evaluate_filter(void *data, sym_func *f, char *str, int *err);
+typedef double (sym_func)(void *data, char *str, char **end, int *err);
+double evaluate_filter(void *data, sym_func *f, char *str, int *err);
 
 #endif /* EXPR_H */

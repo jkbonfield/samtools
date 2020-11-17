@@ -73,7 +73,7 @@ typedef struct samview_settings {
 extern const char *bam_get_library(sam_hdr_t *header, const bam1_t *b);
 extern int bam_remove_B(bam1_t *b);
 
-static int bam_sym_lookup(void *data, char *str, char **end, int *err) {
+static double bam_sym_lookup(void *data, char *str, char **end, int *err) {
     bam1_t *b = (bam1_t *)data;
 
     // TODO:

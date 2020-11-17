@@ -51,7 +51,7 @@ int lookup(void *data, char *str, char **end, int *err) {
 }
 
 typedef struct {
-    int   val;
+    double val;
     char *str;
 } test_ev;
 
@@ -139,11 +139,12 @@ int test(void) {
         {  1, "((2*3)&7) > 4 && 2*2 <= 4"},
     };
 
-    int err = 0, r, i;
+    int err = 0, i;
+    double r;
     for (i = 0; i < sizeof(tests) / sizeof(*tests); i++) {
         if ((r=evaluate_filter(NULL, lookup, tests[i].str, &err))
 	    != tests[i].val) {
-            fprintf(stderr, "Failed test: %s == %d, got %d\n",
+            fprintf(stderr, "Failed test: %s == %f, got %f\n",
                     tests[i].str, tests[i].val, r);
             return 1;
         }
@@ -155,7 +156,7 @@ int test(void) {
 int main(int argc, char **argv) {
     if (argc > 1) {
         int err = 0;
-        printf("expr = %d\n", evaluate_filter(NULL, lookup, argv[1], &err));
+        printf("expr = %f\n", evaluate_filter(NULL, lookup, argv[1], &err));
         printf("err = %d\n", err);
         return 0;
     }

@@ -24,7 +24,6 @@ DEALINGS IN THE SOFTWARE.  */
 
 // TODO:
 // - add maths functions.  pow, sqrt, log, min, max, ?
-// - add floating point (use double for either?)
 // - ?: operator for conditionals?
 // - string literals (for variable comparison
 // - variable lookup: supply a callback func to return value?
@@ -35,6 +34,8 @@ DEALINGS IN THE SOFTWARE.  */
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <stdint.h>
+#include <float.h>
 
 #include "expr.h"
 
@@ -63,8 +64,8 @@ static char *ws(char *str) {
     return str;
 }
 
-static int expression(void *data, sym_func *f,
-                      char *str, char **end, int *err);
+static double expression(void *data, sym_func *f,
+			 char *str, char **end, int *err);
 
 /*
  * simple_expr
@@ -73,14 +74,14 @@ static int expression(void *data, sym_func *f,
  * //  | string ?
  *     | '(' expression ')'
 */
-static int simple_expr(void *data, sym_func *f,
-                       char *str, char **end, int *err) {
+static double simple_expr(void *data, sym_func *f,
+			  char *str, char **end, int *err) {
     // FIXME: use double throughout so we
     // can handle int as well as floats?  Any rounding issues
     // to be concerned with?
 
     // Simple for now; ints only
-    int ret = 0;
+    double ret = 0;
 
     // Main recursion step
     str = ws(str);
@@ -98,21 +99,21 @@ static int simple_expr(void *data, sym_func *f,
         return ret;
     }
 
-    // Otherwise a basic element
-    if (isdigit(*str)) {
-        ret = *str++-'0';
-
-        while (isdigit(*str))
-            ret = ret*10 + *str++-'0';
-
-        *end = str;
-    } else if (f) {
-        // Look up var
-        ret = f(data, str, end, err);
-        if (*err) return -1;
-    } else {
-        *err = 1;
-        return -1;
+    // Otherwise a basic element.
+    // Ideally use hts_str2dbl, but it's internal only.
+    // FIXME: update this if/when we migrate this from samtools to htslib.
+    ret = strtod(str, end);
+    if (str == *end) {
+	// Not valid floating point syntax.
+	// FIXME: add function call names in here; len(), sqrt(), pow(), etc
+	if (f) {
+	    // Look up variable
+	    ret = f(data, str, end, err);
+	    if (*err) return -1;
+	} else {
+	    *err = 1;
+	    return -1;
+	}
     }
 
     return ret;
@@ -125,18 +126,18 @@ static int simple_expr(void *data, sym_func *f,
  *     | '-' simple_expr
  *     | '!' unary_expr
  */
-static int unary_expr(void *data, sym_func *f,
-                      char *str, char **end, int *err) {
-    int ret;
+static double unary_expr(void *data, sym_func *f,
+			 char *str, char **end, int *err) {
+    double ret;
     str = ws(str);
     if (*str == '+') {
         ret = simple_expr(data, f, str+1, end, err);
     } else if (*str == '-') {
         ret = -simple_expr(data, f, str+1, end, err);
     } else if (*str == '!') {
-        ret = !unary_expr(data, f, str+1, end, err);
+        ret = !(int64_t)unary_expr(data, f, str+1, end, err);
     } else if (*str == '~') {
-        ret = ~unary_expr(data, f, str+1, end, err);
+        ret = ~(int64_t)unary_expr(data, f, str+1, end, err);
     } else {
         ret = simple_expr(data, f, str, end, err);
     }
@@ -152,9 +153,9 @@ static int unary_expr(void *data, sym_func *f,
  *         | unary_expr '%' unary_expr
  *       )*
  */
-static int mul_expr(void *data, sym_func *f,
-                    char *str, char **end, int *err) {
-    int ret = unary_expr(data, f, str, end, err);
+static double mul_expr(void *data, sym_func *f,
+		       char *str, char **end, int *err) {
+    double ret = unary_expr(data, f, str, end, err);
     if (*err) return -1;
 
     str = *end;
@@ -165,7 +166,7 @@ static int mul_expr(void *data, sym_func *f,
         else if (*str == '/')
             ret = ret / unary_expr(data, f, str+1, end, err);
         else if (*str == '%')
-            ret = ret % unary_expr(data, f, str+1, end, err);
+            ret = (int64_t)ret % (int64_t)unary_expr(data, f, str+1, end, err);
         else
             break;
 
@@ -182,9 +183,9 @@ static int mul_expr(void *data, sym_func *f,
  *         | mul_expr '-' mul_expr
  *       )*
  */
-static int add_expr(void *data, sym_func *f,
-                    char *str, char **end, int *err) {
-    int ret;
+static double add_expr(void *data, sym_func *f,
+		       char *str, char **end, int *err) {
+    double ret;
 
     ret = mul_expr(data, f, str, end, err);
     if (*err) return -1;
@@ -215,9 +216,9 @@ static int add_expr(void *data, sym_func *f,
  *     | cmp_expr '>=' add_expr
  *     | cmp_expr '>'  add_expr
  */
-static int cmp_expr(void *data, sym_func *f,
-                    char *str, char **end, int *err) {
-    int ret = add_expr(data, f, str, end, err);
+static double cmp_expr(void *data, sym_func *f,
+		       char *str, char **end, int *err) {
+    double ret = add_expr(data, f, str, end, err);
     if (*err) return -1;
 
     str = ws(*end);
@@ -241,18 +242,38 @@ static int cmp_expr(void *data, sym_func *f,
  *     | eq_expr '='  cmp_expr
  *     | eq_expr '!=' cmp_expr
  */
-static int eq_expr(void *data, sym_func *f,
-		   char *str, char **end, int *err) {
-    int ret = cmp_expr(data, f, str, end, err);
+static double eq_expr(void *data, sym_func *f,
+		      char *str, char **end, int *err) {
+    double ret = cmp_expr(data, f, str, end, err);
     if (*err) return -1;
 
     str = ws(*end);
+#if 1
     if (strncmp(str, "==", 2) == 0)
         ret = ret == eq_expr(data, f, str+2, end, err);
     else if (*str == '=') // synonym for ==
         ret = ret == eq_expr(data, f, str+1, end, err);
     else if (strncmp(str, "!=", 2) == 0)
         ret = ret != eq_expr(data, f, str+2, end, err);
+#else
+// For friendliness sake and the fact we're using doubles for representing
+// integers, treat equality as within a small amount.  If we had a more
+// expressive language we could do away with this perhaps.
+// Eg 100.0/17*15*17/15 == 100
+#define DBL_DELTA (DBL_EPSILON*100)  // approx 2e-14
+
+    int n = 1;
+    if (strncmp(str, "==", 2) == 0)
+        ret -= eq_expr(data, f, str+2, end, err);
+    else if (*str == '=') // synonym for ==
+        ret -= eq_expr(data, f, str+1, end, err);
+    else if (strncmp(str, "!=", 2) == 0)
+        ret -= eq_expr(data, f, str+2, end, err), n=0;
+    else
+	return *err ? -1 : ret;
+
+    ret = ret >= -DBL_DELTA && ret <= DBL_DELTA ? n : 1-n;
+#endif
 
     if (*err) ret = -1;
     return ret;
@@ -263,15 +284,15 @@ static int eq_expr(void *data, sym_func *f,
  *     : eq_expr
  *     | bitand_expr '&' eq_expr
  */
-static int bitand_expr(void *data, sym_func *f,
-                      char *str, char **end, int *err) {
-    int ret = eq_expr(data, f, str, end, err);
+static double bitand_expr(void *data, sym_func *f,
+			  char *str, char **end, int *err) {
+    double ret = eq_expr(data, f, str, end, err);
     if (*err) return -1;
 
     for (;;) {
         str = ws(*end);
         if (*str == '&' && str[1] != '&')
-            ret = eq_expr(data, f, str+1, end, err) & ret;
+            ret = (int64_t)eq_expr(data, f, str+1, end, err) & (int64_t)ret;
         else
             break;
     }
@@ -285,15 +306,15 @@ static int bitand_expr(void *data, sym_func *f,
  *     : bitand_expr
  *     | bitxor_expr '^' bitand_expr
  */
-static int bitxor_expr(void *data, sym_func *f,
-		       char *str, char **end, int *err) {
-    int ret = bitand_expr(data, f, str, end, err);
+static double bitxor_expr(void *data, sym_func *f,
+			  char *str, char **end, int *err) {
+    double ret = bitand_expr(data, f, str, end, err);
     if (*err) return -1;
 
     for (;;) {
         str = ws(*end);
         if (*str == '^')
-            ret = bitand_expr(data, f, str+1, end, err) ^ ret;
+            ret = (int64_t)bitand_expr(data, f, str+1, end,err) ^ (int64_t)ret;
         else
             break;
     }
@@ -307,15 +328,15 @@ static int bitxor_expr(void *data, sym_func *f,
  *     : xor_expr
  *     | bitor_expr '|' xor_expr
  */
-static int bitor_expr(void *data, sym_func *f,
-                      char *str, char **end, int *err) {
-    int ret = bitxor_expr(data, f, str, end, err);
+static double bitor_expr(void *data, sym_func *f,
+			 char *str, char **end, int *err) {
+    double ret = bitxor_expr(data, f, str, end, err);
     if (*err) return -1;
 
     for (;;) {
         str = ws(*end);
         if (*str == '|' && str[1] != '|')
-            ret = bitxor_expr(data, f, str+1, end, err) | ret;
+            ret = (int64_t)bitxor_expr(data, f, str+1, end,err) | (int64_t)ret;
         else
             break;
     }
@@ -330,9 +351,9 @@ static int bitor_expr(void *data, sym_func *f,
  *     | and_expr 'and' bitop_expr
  *     | and_expr 'or'  bitop_expr
  */
-static int and_expr(void *data, sym_func *f,
-                    char *str, char **end, int *err) {
-    int ret = bitor_expr(data, f, str, end, err);
+static double and_expr(void *data, sym_func *f,
+		       char *str, char **end, int *err) {
+    double ret = bitor_expr(data, f, str, end, err);
     if (*err) return -1;
 
     for (;;) {
@@ -349,15 +370,15 @@ static int and_expr(void *data, sym_func *f,
     return ret;
 }
 
-static int expression(void *data, sym_func *f,
-                      char *str, char **end, int *err) {
+static double expression(void *data, sym_func *f,
+			 char *str, char **end, int *err) {
     return and_expr(data, f, str, end, err);
 }
 
-int evaluate_filter(void *data, sym_func *f, char *str, int *err) {
+double evaluate_filter(void *data, sym_func *f, char *str, int *err) {
     char *end = NULL;
 
-    int ret = expression(data, f, str, &end, err);
+    double ret = expression(data, f, str, &end, err);
     if (end && *ws(end)) {
         fprintf(stderr, "Unable to parse expression at %s\n", str);
         *err = 1;
