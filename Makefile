@@ -90,7 +90,8 @@ TEST_PROGRAMS = \
 	test/split/test_expand_format_string \
 	test/split/test_filter_header_rg \
 	test/split/test_parse_args \
-	test/vcf-miniview
+	test/vcf-miniview \
+	test/test-expr
 
 all: $(PROGRAMS) $(MISC_PROGRAMS) $(TEST_PROGRAMS)
 
@@ -134,7 +135,7 @@ print-version:
 .c.o:
 	$(CC) $(CFLAGS) $(ALL_CPPFLAGS) -c -o $@ $<
 
-LIBST_OBJS = sam_opts.o sam_utils.o bedidx.o
+LIBST_OBJS = sam_opts.o sam_utils.o bedidx.o expr.o
 
 
 lib:libbam.a
@@ -211,6 +212,7 @@ amplicon_stats.o: amplicon_stats.c config.h $(htslib_sam_h) $(htslib_khash_h) $(
 bam_markdup.o: bam_markdup.c config.h $(htslib_thread_pool_h) $(htslib_sam_h) $(sam_opts_h) $(samtools_h) $(htslib_khash_h) $(htslib_klist_h) $(htslib_kstring_h) $(tmp_file_h)
 tmp_file.o: tmp_file.c config.h $(tmp_file_h) $(htslib_sam_h)
 bam_ampliconclip.o: bam_ampliconclip.c config.h $(htslib_thread_pool_h) $(sam_opts_h) $(htslib_hts_h) $(htslib_hfile_h) $(htslib_kstring_h) $(htslib_sam_h) $(samtools_h) bam_ampliconclip.h
+expr.o: expr.c expr.h config.h
 
 # Maintainer source code checks
 # - copyright boilerplate presence
@@ -232,6 +234,7 @@ check test: samtools $(BGZIP) $(TEST_PROGRAMS)
 	test/split/test_expand_format_string
 	test/split/test_filter_header_rg
 	test/split/test_parse_args
+	test/test-expr
 	REF_PATH=: test/test.pl --exec bgzip=$(BGZIP) $${TEST_OPTS:-}
 	test/merge/test_bam_translate test/merge/test_bam_translate.tmp
 	test/merge/test_rtrans_build
@@ -264,6 +267,9 @@ test/split/test_parse_args: test/split/test_parse_args.o test/test.o libst.a $(H
 test/vcf-miniview: test/vcf-miniview.o $(HTSLIB)
 	$(CC) $(ALL_LDFLAGS) -o $@ test/vcf-miniview.o $(HTSLIB_LIB) $(ALL_LIBS) -lpthread
 
+test/test-expr: test/test-expr.o libst.a $(HTSLIB)
+	$(CC) $(ALL_LDFLAGS) -o $@ test/test-expr.o libst.a $(HTSLIB_LIB) $(ALL_LIBS) -lpthread
+
 test_test_h = test/test.h $(htslib_sam_h)
 
 test/merge/test_bam_translate.o: test/merge/test_bam_translate.c config.h bam_sort.o $(test_test_h)
@@ -275,6 +281,7 @@ test/split/test_filter_header_rg.o: test/split/test_filter_header_rg.c config.h 
 test/split/test_parse_args.o: test/split/test_parse_args.c config.h bam_split.o $(test_test_h)
 test/test.o: test/test.c config.h $(htslib_sam_h) $(test_test_h)
 test/vcf-miniview.o: test/vcf-miniview.c config.h $(htslib_vcf_h)
+test/test-expr.o: test/test-expr.c expr.h config.h
 
 
 # misc programs
