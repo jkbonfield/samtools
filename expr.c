@@ -47,7 +47,7 @@ DEALINGS IN THE SOFTWARE.  */
  * Supported syntax:
  *
  * Unary ops:     +, -, !, ~  eg -10 +10, !10 (0), ~5 (bitwise not)
- * Math ops:      +, -, *, /
+ * Math ops:      +, -, *, /, %
  * Conditionals:  >, >=, <, <=, =, == (synonym for =)
  * Boolean:       &&, ||
  * Bit-wise:      &, |, ^ (XOR)
@@ -214,8 +214,6 @@ static int add_expr(void *data, sym_func *f,
  *     | cmp_expr '<'  add_expr
  *     | cmp_expr '>=' add_expr
  *     | cmp_expr '>'  add_expr
- *     | cmp_expr '='  add_expr
- *     | cmp_expr '!=' add_expr
  */
 static int cmp_expr(void *data, sym_func *f,
                     char *str, char **end, int *err) {
@@ -231,37 +229,93 @@ static int cmp_expr(void *data, sym_func *f,
         ret = ret <= cmp_expr(data, f, str+2, end, err);
     else if (*str == '<')
         ret = ret < cmp_expr(data, f, str+1, end, err);
-    else if (strncmp(str, "==", 2) == 0)
-        ret = ret == cmp_expr(data, f, str+2, end, err);
-    else if (*str == '=') // synonym for ==
-        ret = ret == cmp_expr(data, f, str+1, end, err);
-    else if (strncmp(str, "!=", 2) == 0)
-        ret = ret != cmp_expr(data, f, str+2, end, err);
 
     if (*err) ret = -1;
     return ret;
 }
 
 /*
- * bitop_expr
+ * eq_expr
  *     : cmp_expr
- *     | bitop_expr '&' cmp_expr
- *     | bitop_expr '|' cmp_expr
- *     | bitop_expr '^' cmp_expr
+ *     | eq_expr '==' cmp_expr
+ *     | eq_expr '='  cmp_expr
+ *     | eq_expr '!=' cmp_expr
  */
-static int bitop_expr(void *data, sym_func *f,
-                      char *str, char **end, int *err) {
+static int eq_expr(void *data, sym_func *f,
+		   char *str, char **end, int *err) {
     int ret = cmp_expr(data, f, str, end, err);
+    if (*err) return -1;
+
+    str = ws(*end);
+    if (strncmp(str, "==", 2) == 0)
+        ret = ret == eq_expr(data, f, str+2, end, err);
+    else if (*str == '=') // synonym for ==
+        ret = ret == eq_expr(data, f, str+1, end, err);
+    else if (strncmp(str, "!=", 2) == 0)
+        ret = ret != eq_expr(data, f, str+2, end, err);
+
+    if (*err) ret = -1;
+    return ret;
+}
+
+/*
+ * bitand_expr
+ *     : eq_expr
+ *     | bitand_expr '&' eq_expr
+ */
+static int bitand_expr(void *data, sym_func *f,
+                      char *str, char **end, int *err) {
+    int ret = eq_expr(data, f, str, end, err);
     if (*err) return -1;
 
     for (;;) {
         str = ws(*end);
         if (*str == '&' && str[1] != '&')
-            ret = cmp_expr(data, f, str+1, end, err) & ret;
-        else if (*str == '|' && str[1] != '|')
-            ret = cmp_expr(data, f, str+1, end, err) | ret;
-        else if (*str == '^')
-            ret = cmp_expr(data, f, str+1, end, err) ^ ret;
+            ret = eq_expr(data, f, str+1, end, err) & ret;
+        else
+            break;
+    }
+
+    if (*err) ret = -1;
+    return ret;
+}
+
+/*
+ * bitxor_expr
+ *     : bitand_expr
+ *     | bitxor_expr '^' bitand_expr
+ */
+static int bitxor_expr(void *data, sym_func *f,
+		       char *str, char **end, int *err) {
+    int ret = bitand_expr(data, f, str, end, err);
+    if (*err) return -1;
+
+    for (;;) {
+        str = ws(*end);
+        if (*str == '^')
+            ret = bitand_expr(data, f, str+1, end, err) ^ ret;
+        else
+            break;
+    }
+
+    if (*err) ret = -1;
+    return ret;
+}
+
+/*
+ * bitor_expr
+ *     : xor_expr
+ *     | bitor_expr '|' xor_expr
+ */
+static int bitor_expr(void *data, sym_func *f,
+                      char *str, char **end, int *err) {
+    int ret = bitxor_expr(data, f, str, end, err);
+    if (*err) return -1;
+
+    for (;;) {
+        str = ws(*end);
+        if (*str == '|' && str[1] != '|')
+            ret = bitxor_expr(data, f, str+1, end, err) | ret;
         else
             break;
     }
@@ -278,15 +332,15 @@ static int bitop_expr(void *data, sym_func *f,
  */
 static int and_expr(void *data, sym_func *f,
                     char *str, char **end, int *err) {
-    int ret = bitop_expr(data, f, str, end, err);
+    int ret = bitor_expr(data, f, str, end, err);
     if (*err) return -1;
 
     for (;;) {
         str = ws(*end);
         if (strncmp(str, "&&", 2) == 0)
-            ret = bitop_expr(data, f, str+2, end, err) && ret;
+            ret = bitor_expr(data, f, str+2, end, err) && ret;
         else if (strncmp(str, "||", 2) == 0)
-            ret = bitop_expr(data, f, str+2, end, err) || ret;
+            ret = bitor_expr(data, f, str+2, end, err) || ret;
         else
             break;
     }
