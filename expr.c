@@ -29,6 +29,8 @@ DEALINGS IN THE SOFTWARE.  */
 // - string literals (for variable comparison
 // - variable lookup: supply a callback func to return value?
 
+#include <config.h>
+
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
@@ -37,56 +39,21 @@ DEALINGS IN THE SOFTWARE.  */
 #include "expr.h"
 
 /*
-
-All rules depend on previous rules except for simple_expr -> expression
-for the primary recursion.  This avoids any backtracking and keeps the
-processing very simple.
-
-simple_expr
-    : identifier
-    | constant
-//  | string ?
-    | '(' expression ')'
-
-unary_expr
-    : simple_expr
-    | '+' simple_expr
-    | '-' simple_expr
-    | '!' unary_expr
-    | '~' unary_expr
-
-mul_expr
-    : unary_expr (
-          unary_expr '*' unary_expr
-        | unary_expr '/' unary_expr
-        | unary_expr '%' unary_expr
-      )*
-
-add_expr
-    : mul_expr (
-          mul_expr '+' mul_expr
-        | mul_expr '-' mul_expr
-      )*
-
-cmp_expr
-    : add_expr
-    | cmp_expr '<=' add_expr
-    | cmp_expr '<'  add_expr
-    | cmp_expr '>=' add_expr
-    | cmp_expr '>'  add_expr
-    | cmp_expr '='  add_expr
-    | cmp_expr '!=' add_expr
-
-and_expr
-    : cmp_expr
-    | and_expr '&&' cmp_expr // logical
-    | and_expr '||' cmp_expr // logical
-    | and_expr '&'  cmp_expr // bit-wise, eg for FLAG
-    | and_expr '|'  cmp_expr // bit-wise, eg for FLAG
-    | and_expr '^'  cmp_expr // bit-wise, eg for FLAG
-
-expression
-    : and_expr
+ * This is designed to be C like with the same precedence rules.  It's not
+ * full C (eg no bit-shifting), but good enough for our purposes.
+ *
+ * For now, all maths is strictly integer.  TODO: switch to double
+ *
+ * Supported syntax:
+ *
+ * Unary ops:     +, -, !, ~  eg -10 +10, !10 (0), ~5 (bitwise not)
+ * Math ops:      +, -, *, /
+ * Conditionals:  >, >=, <, <=, =, == (synonym for =)
+ * Boolean:       &&, ||
+ * Bit-wise:      &, |, ^ (XOR)
+ * Grouping:      (, ),   eg "(1+2)*3"
+ * Numerics:      integer only at present (no floats)
+ * Variables:     any non-numeric
  */
 
 // Skip to start of term
@@ -95,14 +62,6 @@ static char *ws(char *str) {
         str++;
     return str;
 }
-
-// // Length of a term.  Used for printing up error messages.
-// static char term_len(char *str) {
-//     char *end = str;
-//     while (*end && !isspace(*end))
-//      end++;
-//     return end-str;
-// }
 
 static int expression(void *data, sym_func *f,
                       char *str, char **end, int *err);
@@ -272,7 +231,9 @@ static int cmp_expr(void *data, sym_func *f,
         ret = ret <= cmp_expr(data, f, str+2, end, err);
     else if (*str == '<')
         ret = ret < cmp_expr(data, f, str+1, end, err);
-    else if (*str == '=')
+    else if (strncmp(str, "==", 2) == 0)
+        ret = ret == cmp_expr(data, f, str+2, end, err);
+    else if (*str == '=') // synonym for ==
         ret = ret == cmp_expr(data, f, str+1, end, err);
     else if (strncmp(str, "!=", 2) == 0)
         ret = ret != cmp_expr(data, f, str+2, end, err);
@@ -282,26 +243,53 @@ static int cmp_expr(void *data, sym_func *f,
 }
 
 /*
- * and_expr
+ * bitop_expr
  *     : cmp_expr
- *     | and_expr 'and' cmp_expr
- *     | and_expr 'or'  cmp_expr
+ *     | bitop_expr '&' cmp_expr
+ *     | bitop_expr '|' cmp_expr
+ *     | bitop_expr '^' cmp_expr
+ */
+static int bitop_expr(void *data, sym_func *f,
+                      char *str, char **end, int *err) {
+    int ret = cmp_expr(data, f, str, end, err);
+    if (*err) return -1;
+
+    for (;;) {
+        str = ws(*end);
+        if (*str == '&' && str[1] != '&')
+            ret = cmp_expr(data, f, str+1, end, err) & ret;
+        else if (*str == '|' && str[1] != '|')
+            ret = cmp_expr(data, f, str+1, end, err) | ret;
+        else if (*str == '^')
+            ret = cmp_expr(data, f, str+1, end, err) ^ ret;
+        else
+            break;
+    }
+
+    if (*err) ret = -1;
+    return ret;
+}
+
+/*
+ * and_expr
+ *     : bitop_expr
+ *     | and_expr 'and' bitop_expr
+ *     | and_expr 'or'  bitop_expr
  */
 static int and_expr(void *data, sym_func *f,
                     char *str, char **end, int *err) {
-    int ret = cmp_expr(data, f, str, end, err);
+    int ret = bitop_expr(data, f, str, end, err);
     if (*err) return -1;
-    str = ws(*end);
-    if (strncmp(str, "&&", 2) == 0)
-        ret = and_expr(data, f, str+2, end, err) && ret;
-    else if (strncmp(str, "||", 2) == 0)
-        ret = and_expr(data, f, str+2, end, err) || ret;
-    else if (*str == '&')
-        ret = and_expr(data, f, str+1, end, err) & ret;
-    else if (*str == '|')
-        ret = and_expr(data, f, str+1, end, err) | ret;
-    else if (*str == '^')
-        ret = and_expr(data, f, str+1, end, err) ^ ret;
+
+    for (;;) {
+        str = ws(*end);
+        if (strncmp(str, "&&", 2) == 0)
+            ret = bitop_expr(data, f, str+2, end, err) && ret;
+        else if (strncmp(str, "||", 2) == 0)
+            ret = bitop_expr(data, f, str+2, end, err) || ret;
+        else
+            break;
+    }
 
     if (*err) ret = -1;
     return ret;
@@ -324,114 +312,3 @@ int evaluate_filter(void *data, sym_func *f, char *str, int *err) {
 
     return ret;
 }
-
-#if defined(EXPR_TEST) || defined(EXPR_MAIN)
-typedef struct {
-    int   val;
-    char *str;
-} test_ev;
-
-void test(void) {
-    // These are all valid expressions that should work
-    test_ev tests[] = {
-        {  1, "1"},
-        {  1, "+1"},
-        { -1, "-1"},
-        {  0, "!7"},
-        {  1, "!0"},
-        {  1, "!(!7)"},
-        {  1, "!!7"},
-
-        {  5, "2+3"},
-        { -1, "2+-3"},
-        {  6, "1+2+3"},
-        {  1, "-2+3"},
-
-        {  6, "2*3"},
-        {  6, "1*2*3"},
-        {  0, "2*0"},
-
-        {  7, "(7)"},
-        {  7, "((7))"},
-        { 21, "(1+2)*(3+4)"},
-        { 14, "(4*5)-(-2*-3)"},
-
-        {  0, "1>2"},
-        {  1, "1<2"},
-        {  0, "3<3"},
-        {  0, "3>3"},
-        {  1, "9<=9"},
-        {  1, "9>=9"},
-        {  1, "2*4=8"},
-        {  0, "2*4!=8"},
-        {  1, "4+2<3+4"},
-        {  0, "4*2<3+4"},
-        {  8, "4*(2<3)+4"},  // boolean; 4*(1)+4
-
-        {  1, "2 && 1"},
-        {  0, "2 && 0"},
-        {  0, "0 && 2"},
-        {  1, "2 || 1"},
-        {  1, "2 || 0"},
-        {  1, "0 || 2"},
-        {  1, "1 || 2 && 3"},
-        {  1, "2 && 3 || 1"},
-        {  1, "0 && 3 || 2"},
-        {  0, "0 && 3 || 0"},
-
-        {  1, "3 & 1"},
-        {  1, "3 & 2"},
-        {  3, "1 | 2"},
-        {  3, "1 | 3"},
-        {  7, "1 | 6"},
-        {  2, "1 ^ 3"},
-
-        {  0, " (2*3)&7  > 4"},
-        {  1, "((2*3)&7) > 4"},
-        {  1, "((2*3)&7) > 4 && 2*2 <= 4"},
-    };
-
-    int err = 0, r, i;
-    for (i = 0; i < sizeof(tests) / sizeof(*tests); i++) {
-        if ((r=evaluate_filter(NULL, NULL, tests[i].str, &err)) != tests[i].val) {
-            fprintf(stderr, "Failed test: %s == %d, got %d\n",
-                    tests[i].str, tests[i].val, r);
-            exit(1);
-        }
-    }
-}
-#endif
-
-#ifdef EXPR_MAIN
-int lookup(void *data, char *str, char **end, int *err) {
-    int foo = 17;
-    int a = 1;
-    int b = 2;
-    int c = 3;
-    if (strncmp(str, "foo", 3) == 0) {
-        *end = str+3;
-        return foo;
-    } else if (*str == 'a') {
-        *end = str+1;
-        return a;
-    } else if (*str == 'b') {
-        *end = str+1;
-        return b;
-    } else if (*str == 'c') {
-        *end = str+1;
-        return c;
-    }
-    *err = 1;
-    return -1;
-}
-
-int main(int argc, char **argv) {
-    if (argc > 1) {
-        int err = 0;
-        printf("expr = %d\n", evaluate_filter(NULL, lookup, argv[1], &err));
-        printf("err = %d\n", err);
-        return 0;
-    }
-    test();
-}
-#endif
