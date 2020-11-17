@@ -28,26 +28,29 @@ DEALINGS IN THE SOFTWARE.  */
 #include <string.h>
 #include "../expr.h"
 
-int lookup(void *data, char *str, char **end, int *err) {
+int lookup(void *data, char *str, char **end, fexpr_t *res) {
     int foo = 15551; // my favourite palindromic prime
     int a = 1;
     int b = 2;
     int c = 3;
+    res->s = NULL;
     if (strncmp(str, "foo", 3) == 0) {
         *end = str+3;
-        return foo;
+	res->d = foo;
     } else if (*str == 'a') {
         *end = str+1;
-        return a;
+	res->d = a;
     } else if (*str == 'b') {
         *end = str+1;
-        return b;
+	res->d = b;
     } else if (*str == 'c') {
         *end = str+1;
-        return c;
+	res->d = c;
+    } else {
+	return -1;
     }
-    *err = 1;
-    return -1;
+    
+    return 0;
 }
 
 typedef struct {
@@ -139,13 +142,18 @@ int test(void) {
         {  1, "((2*3)&7) > 4 && 2*2 <= 4"},
     };
 
-    int err = 0, i;
-    double r;
+    int i;
+    fexpr_t r;
     for (i = 0; i < sizeof(tests) / sizeof(*tests); i++) {
-        if ((r=evaluate_filter(NULL, lookup, tests[i].str, &err))
-	    != tests[i].val) {
+        if (evaluate_filter(NULL, lookup, tests[i].str, &r)) {
+	    fprintf(stderr, "Failed to parse filter string %s\n",
+		    tests[i].str);
+	    return 1;
+	}
+
+	if (r.d != tests[i].val) {
             fprintf(stderr, "Failed test: %s == %f, got %f\n",
-                    tests[i].str, tests[i].val, r);
+                    tests[i].str, tests[i].val, r.d);
             return 1;
         }
     }
@@ -155,8 +163,9 @@ int test(void) {
 
 int main(int argc, char **argv) {
     if (argc > 1) {
-        int err = 0;
-        printf("expr = %f\n", evaluate_filter(NULL, lookup, argv[1], &err));
+	fexpr_t v;
+        int err = evaluate_filter(NULL, lookup, argv[1], &v);
+        printf("expr = %f\n", v.d);
         printf("err = %d\n", err);
         return 0;
     }

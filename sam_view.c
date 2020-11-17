@@ -73,7 +73,7 @@ typedef struct samview_settings {
 extern const char *bam_get_library(sam_hdr_t *header, const bam1_t *b);
 extern int bam_remove_B(bam1_t *b);
 
-static double bam_sym_lookup(void *data, char *str, char **end, int *err) {
+static int bam_sym_lookup(void *data, char *str, char **end, fexpr_t *res) {
     bam1_t *b = (bam1_t *)data;
 
     // TODO:
@@ -83,82 +83,96 @@ static double bam_sym_lookup(void *data, char *str, char **end, int *err) {
     //   would need qual returned as string / array and "avg" as data
     //   transform in the expression parser.  Then permits min, max, etc.
 
+    res->s = NULL;
     if (strncasecmp(str, "flag", 4) == 0) {
         str = *end = str+4;
         if (*str != '.') {
-            return b->core.flag;
+            res->d = b->core.flag;
+            return 0;
         } else {
             str++;
             if (!strncasecmp(str, "paired", 6)) {
                 *end = str+6;
-                return b->core.flag & BAM_FPAIRED ? 1 : 0;
+                res->d = b->core.flag & BAM_FPAIRED ? 1 : 0;
+                return 0;
             } else if (!strncasecmp(str, "proper_pair", 11)) {
                 *end = str+11;
-                return b->core.flag & BAM_FPROPER_PAIR ? 1 : 0;
+                res->d = b->core.flag & BAM_FPROPER_PAIR ? 1 : 0;
+                return 0;
             } else if (!strncasecmp(str, "unmap", 5)) {
                 *end = str+5;
-                return b->core.flag & BAM_FUNMAP ? 1 : 0;
+                res->d = b->core.flag & BAM_FUNMAP ? 1 : 0;
+                return 0;
             } else if (!strncasecmp(str, "munmap", 6)) {
                 *end = str+6;
-                return b->core.flag & BAM_FMUNMAP ? 1 : 0;
+                res->d = b->core.flag & BAM_FMUNMAP ? 1 : 0;
+                return 0;
             } else if (!strncasecmp(str, "reverse", 7)) {
                 *end = str+7;
-                return b->core.flag & BAM_FREVERSE ? 1 : 0;
+                res->d = b->core.flag & BAM_FREVERSE ? 1 : 0;
+                return 0;
             } else if (!strncasecmp(str, "mreverse", 8)) {
                 *end = str+8;
-                return b->core.flag & BAM_FMREVERSE ? 1 : 0;
+                res->d = b->core.flag & BAM_FMREVERSE ? 1 : 0;
+                return 0;
             } else if (!strncasecmp(str, "read1", 5)) {
                 *end = str+5;
-                return b->core.flag & BAM_FREAD1 ? 1 : 0;
+                res->d = b->core.flag & BAM_FREAD1 ? 1 : 0;
+                return 0;
             } else if (!strncasecmp(str, "read2", 6)) {
                 *end = str+5;
-                return b->core.flag & BAM_FREAD2 ? 1 : 0;
+                res->d = b->core.flag & BAM_FREAD2 ? 1 : 0;
+                return 0;
             } else if (!strncasecmp(str, "secondary", 9)) {
                 *end = str+9;
-                return b->core.flag & BAM_FSECONDARY ? 1 : 0;
+                res->d = b->core.flag & BAM_FSECONDARY ? 1 : 0;
+                return 0;
             } else if (!strncasecmp(str, "qcfail", 6)) {
                 *end = str+6;
-                return b->core.flag & BAM_FQCFAIL ? 1 : 0;
+                res->d = b->core.flag & BAM_FQCFAIL ? 1 : 0;
+                return 0;
             } else if (!strncasecmp(str, "dup", 3)) {
                 *end = str+3;
-                return b->core.flag & BAM_FDUP ? 1 : 0;
+                res->d = b->core.flag & BAM_FDUP ? 1 : 0;
+                return 0;
             } else if (!strncasecmp(str, "supplementary", 13)) {
                 *end = str+13;
-                return b->core.flag & BAM_FSUPPLEMENTARY ? 1 : 0;
+                res->d = b->core.flag & BAM_FSUPPLEMENTARY ? 1 : 0;
+                return 0;
             } else {
                 fprintf(stderr, "Unrecognised flag string\n");
-                *err = 1;
                 return -1;
             }
         }
     } else if (strncasecmp(str, "mqual", 5) == 0) {
         *end = str+5;
-        return b->core.qual;
+        res->d = b->core.qual;
     } else if (strncasecmp(str, "qlen", 4) == 0) {
         *end = str+4;
-        return b->core.l_qseq;
+        res->d = b->core.l_qseq;
     } else if (strncasecmp(str, "rlen", 4) == 0) {
         *end = str+4;
-        return bam_cigar2rlen(b->core.n_cigar, bam_get_cigar(b));
+        res->d = bam_cigar2rlen(b->core.n_cigar, bam_get_cigar(b));
     } else if (strncasecmp(str, "ncigar", 6) == 0) {
         *end = str+6;
-        return b->core.n_cigar;
+        res->d = b->core.n_cigar;
     } else if (strncasecmp(str, "mtid", 4) == 0) {
         *end = str+4;
-        return b->core.mtid;
+        res->d = b->core.mtid;
     } else if (strncasecmp(str, "isize", 5) == 0) {
         *end = str+5;
-        return b->core.isize;
+        res->d = b->core.isize;
     } else if (strncasecmp(str, "pos", 3) == 0) {
         *end = str+3;
-        return b->core.pos;
+        res->d = b->core.pos;
     } else if (strncasecmp(str, "tid", 3) == 0) {
         *end = str+3;
-        return b->core.tid;
+        res->d = b->core.tid;
+    } else {
+        return -1;
     }
 
-    *err = 1;
-    return -1;
+    return 0;
 }
 
 // Returns 0 to indicate read should be output 1 otherwise
@@ -222,9 +236,10 @@ static int process_aln(const sam_hdr_t *h, bam1_t *b, samview_settings_t* settin
     }
 
     if (settings->match_expr) {
-        int err = 0;
-        return evaluate_filter(b, bam_sym_lookup, settings->match_expr, &err)
-            ? 0 : 1;
+        fexpr_t res;
+        if (evaluate_filter(b, bam_sym_lookup, settings->match_expr, &res))
+            return -1;
+        return res.s || res.d ? 0 : 1;
     }
 
     return 0;
