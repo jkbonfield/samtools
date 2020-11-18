@@ -83,7 +83,6 @@ int test(void) {
         { 21, "(1+2)*(3+4)"},
         { 14, "(4*5)-(-2*-3)"},
 
-	{  1, "(1+2)*3=9"},
 	{  1, "(1+2)*3==9"},
 	{  1, "(1+2)*3!=8"},
 	{  0, "(1+2)*3!=9"},
@@ -95,7 +94,10 @@ int test(void) {
         {  0, "3>3"},
         {  1, "9<=9"},
         {  1, "9>=9"},
-        {  1, "2*4=8"},
+        {  1, "2*4==8"},
+        {  1, "16==0x10"},
+        {  1, "15<0x10"},
+        {  1, "17>0x10"},
         {  0, "2*4!=8"},
         {  1, "4+2<3+4"},
         {  0, "4*2<3+4"},
@@ -165,7 +167,10 @@ int main(int argc, char **argv) {
     if (argc > 1) {
 	fexpr_t v;
         int err = evaluate_filter(NULL, lookup, argv[1], &v);
-        printf("expr = %f\n", v.d);
+	if (v.s)
+	    printf("expr = \"%s\"\n", v.s);
+	else
+	    printf("expr = %f\n", v.d);
         printf("err = %d\n", err);
         return 0;
     }

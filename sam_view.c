@@ -168,6 +168,13 @@ static int bam_sym_lookup(void *data, char *str, char **end, fexpr_t *res) {
     } else if (strncasecmp(str, "tid", 3) == 0) {
         *end = str+3;
         res->d = b->core.tid;
+
+//  Strings
+
+    } else if (strncasecmp(str, "name", 4) == 0) {
+        *end = str+4;
+        res->s = bam_get_qname(b);
+
     } else {
         return -1;
     }

@@ -36,25 +36,25 @@ DEALINGS IN THE SOFTWARE.  */
 #include <stdlib.h>
 #include <stdint.h>
 #include <float.h>
+#include <regex.h> // may need configure rule for this
 
 #include "expr.h"
 
 /*
- * This is designed to be C like with the same precedence rules.  It's not
- * full C (eg no bit-shifting), but good enough for our purposes.
+ * This is designed to be mostly C like with mostly same the precedence rules.
+ * It's not full C (eg no bit-shifting), but good enough for our purposes.
  *
- * For now, all maths is strictly integer.  TODO: switch to double
+ * Supported syntax, in order of precedence:
  *
- * Supported syntax:
- *
- * Unary ops:     +, -, !, ~  eg -10 +10, !10 (0), ~5 (bitwise not)
- * Math ops:      +, -, *, /, %
- * Conditionals:  >, >=, <, <=, =, == (synonym for =)
- * Boolean:       &&, ||
- * Bit-wise:      &, |, ^ (XOR)
  * Grouping:      (, ),   eg "(1+2)*3"
- * Numerics:      integer only at present (no floats)
- * Variables:     any non-numeric
+ * Values:        integers, floats, strings or variables
+ * Unary ops:     +, -, !, ~  eg -10 +10, !10 (0), ~5 (bitwise not)
+ * Math ops:      *, /, %  [TODO: add // for floor division?]
+ * Math ops:      +, -
+ * Conditionals:  >, >=, <, <=,
+ * Equality:      ==, !=, =~ !~
+ * Bit-wise:      &, |, ^  [NB as 3 precedence levels, in that order]
+ * Boolean:       &&, ||
  */
 
 // Skip to start of term
@@ -100,7 +100,24 @@ static int simple_expr(void *data, sym_func *f,
     } else {
 	// Not valid floating point syntax.
 	// FIXME: add function call names in here; len(), sqrt(), pow(), etc
-	if (f)
+	if (*str == '"') {
+	    // string.  FIXME: cope with backslashes at some point.
+	    res->s = str+1;
+	    char *e = str+1;
+	    while (*e && *e != '"')
+		e++;
+
+	    // FIXME: this modifies the query string.
+	    // Alternatives are taking a copy and all the memory allocation
+	    // bits that go with it, or storing string plus length.
+	    //
+	    // If we want to cope with escaping rules (\" etc) then
+	    // kstring as one of the types is probably more robust.
+	    if (*e == '"')
+		*e++ = 0;
+
+	    *end = e;
+	} else if (f)
 	    // Look up variable
 	    return f(data, str, end, res);
 	else
@@ -259,8 +276,9 @@ static int cmp_expr(void *data, sym_func *f,
  * eq_expr
  *     : cmp_expr
  *     | eq_expr '==' cmp_expr
- *     | eq_expr '='  cmp_expr
  *     | eq_expr '!=' cmp_expr
+ *     | eq_expr '=~' cmp_expr
+ *     | eq_expr '!~' cmp_expr
  */
 static int eq_expr(void *data, sym_func *f,
 		   char *str, char **end, fexpr_t *res) {
@@ -270,17 +288,36 @@ static int eq_expr(void *data, sym_func *f,
 #if 1
     int err = 0;
     fexpr_t val = {NULL, 0};
-    if (*str == '=') {
+    if (strncmp(str, "==", 2) == 0) {
 	// TODO: add =~ for strings
-	err = eq_expr(data, f, str+1+(str[1]=='='), end, &val);
+	err = eq_expr(data, f, str+2, end, &val);
 	res->d = res->s && val.s
 	    ? strcmp(res->s, val.s)==0
 	    : (res->s || val.s) ? 0 : res->d == val.d;
+	res->s = NULL;
     } else if (strncmp(str, "!=", 2) == 0) {
 	err = eq_expr(data, f, str+2, end, &val);
 	res->d = res->s && val.s
 	    ? strcmp(res->s, val.s)!=0
 	    : (res->s || val.s) ? 0 : res->d != val.d;
+	res->s = NULL;
+    } else if (strncmp(str, "=~", 2) == 0 || strncmp(str, "!~", 2) == 0) {
+	err = eq_expr(data, f, str+2, end, &val);
+	if (!val.s || !res->s) return -1;
+	regex_t preg;
+	int ec;
+	// FIXME: cache compiled regexp
+	if ((ec = regcomp(&preg, val.s, REG_EXTENDED | REG_NOSUB)) != 0) {
+	    char errbuf[1024];
+	    regerror(ec, &preg, errbuf, 1024);
+	    fprintf(stderr, "Failed regex: %.1024s\n", errbuf);
+	    return -1;
+	}
+	res->d = regexec(&preg, res->s, 0, NULL, 0) == 0
+	    ? *str == '='  // matcn
+	    : *str == '!'; // no-match
+	res->s = NULL;
+	regfree(&preg);
     }
 
 #else
