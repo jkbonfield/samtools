@@ -36,16 +36,16 @@ int lookup(void *data, char *str, char **end, fexpr_t *res) {
     res->is_str = 0;
     if (strncmp(str, "foo", 3) == 0) {
         *end = str+3;
-	res->d = foo;
+        res->d = foo;
     } else if (*str == 'a') {
         *end = str+1;
-	res->d = a;
+        res->d = a;
     } else if (*str == 'b') {
         *end = str+1;
-	res->d = b;
+        res->d = b;
     } else if (*str == 'c') {
         *end = str+1;
-	res->d = c;
+        res->d = c;
     } else if (strncmp(str, "magic", 5) == 0) {
         // non-empty string
         *end = str+5;
@@ -62,9 +62,9 @@ int lookup(void *data, char *str, char **end, fexpr_t *res) {
         res->is_str = 1;
         ks_clear(&res->s);
     } else {
-	return -1;
+        return -1;
     }
-    
+
     return 0;
 }
 
@@ -99,10 +99,10 @@ int test(void) {
         { 21, NULL, "(1+2)*(3+4)"},
         { 14, NULL, "(4*5)-(-2*-3)"},
 
-	{  1, NULL, "(1+2)*3==9"},
-	{  1, NULL, "(1+2)*3!=8"},
-	{  0, NULL, "(1+2)*3!=9"},
-	{  0, NULL, "(1+2)*3==8"},
+        {  1, NULL, "(1+2)*3==9"},
+        {  1, NULL, "(1+2)*3!=8"},
+        {  0, NULL, "(1+2)*3!=9"},
+        {  0, NULL, "(1+2)*3==8"},
 
         {  0, NULL, "1>2"},
         {  1, NULL, "1<2"},
@@ -119,8 +119,8 @@ int test(void) {
         {  0, NULL, "4*2<3+4"},
         {  8, NULL, "4*(2<3)+4"},  // boolean; 4*(1)+4
 
-	{  1, NULL, "(1<2) == (3>2)"},
-	{  1, NULL, "1<2 == 3>2"},
+        {  1, NULL, "(1<2) == (3>2)"},
+        {  1, NULL, "1<2 == 3>2"},
 
         {  1, NULL, "2 && 1"},
         {  0, NULL, "2 && 0"},
@@ -140,20 +140,20 @@ int test(void) {
         {  7, NULL, "1 | 6"},
         {  2, NULL, "1 ^ 3"},
 
-	{  1, NULL, "(1^0)&(4^3)"},
-	{  2, NULL, "1 ^(0&4)^ 3"},
-	{  2, NULL, "1 ^ 0&4 ^ 3"},  // precedence, & before ^
+        {  1, NULL, "(1^0)&(4^3)"},
+        {  2, NULL, "1 ^(0&4)^ 3"},
+        {  2, NULL, "1 ^ 0&4 ^ 3"},  // precedence, & before ^
 
-	{  6, NULL, "(1|0)^(4|3)"},
-	{  7, NULL, "1 |(0^4)| 3"},
-	{  7, NULL, "1 | 0^4 | 3"},  // precedence, ^ before |
+        {  6, NULL, "(1|0)^(4|3)"},
+        {  7, NULL, "1 |(0^4)| 3"},
+        {  7, NULL, "1 | 0^4 | 3"},  // precedence, ^ before |
 
-	{  1, NULL, "4 & 2 || 1"},
-	{  1, NULL, "(4 & 2) || 1"},
-	{  0, NULL, "4 & (2 || 1)"},
-	{  1, NULL, "1 || 4 & 2"},
-	{  1, NULL, "1 || (4 & 2)"},
-	{  0, NULL, "(1 || 4) & 2"},
+        {  1, NULL, "4 & 2 || 1"},
+        {  1, NULL, "(4 & 2) || 1"},
+        {  0, NULL, "4 & (2 || 1)"},
+        {  1, NULL, "1 || 4 & 2"},
+        {  1, NULL, "1 || (4 & 2)"},
+        {  0, NULL, "(1 || 4) & 2"},
 
         {  0, NULL, " (2*3)&7  > 4"},
         {  1, NULL, "((2*3)&7) > 4"},
@@ -184,10 +184,10 @@ int test(void) {
     fexpr_t r;
     for (i = 0; i < sizeof(tests) / sizeof(*tests); i++) {
         if (evaluate_filter(NULL, lookup, tests[i].str, &r)) {
-	    fprintf(stderr, "Failed to parse filter string %s\n",
-		    tests[i].str);
-	    return 1;
-	}
+            fprintf(stderr, "Failed to parse filter string %s\n",
+                    tests[i].str);
+            return 1;
+        }
 
         if (r.is_str && (strcmp(r.s.s, tests[i].sval) != 0
                          || r.d != tests[i].dval)) {
@@ -208,12 +208,12 @@ int test(void) {
 
 int main(int argc, char **argv) {
     if (argc > 1) {
-	fexpr_t v;
+        fexpr_t v;
         int err = evaluate_filter(NULL, lookup, argv[1], &v);
-	if (v.is_str)
-	    printf("expr = \"%s\" (d=%f)\n", v.s.s, v.d);
-	else
-	    printf("expr = %f\n", v.d);
+        if (v.is_str)
+            printf("expr = \"%s\" (d=%f)\n", v.s.s, v.d);
+        else
+            printf("expr = %f\n", v.d);
         printf("err = %d\n", err);
 
         fexpr_free(&v);
