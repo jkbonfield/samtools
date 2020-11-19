@@ -174,7 +174,49 @@ static int bam_sym_lookup(void *data, char *str, char **end, fexpr_t *res) {
     } else if (strncasecmp(str, "name", 4) == 0) {
         *end = str+4;
         res->is_str = 1;
-        kputs(bam_get_qname(b), &res->s);
+        kputs(bam_get_qname(b), ks_clear(&res->s));
+
+    } else if (*str == '[' && str[1] && str[2] && str[3] == ']') {
+        /* aux tags */
+        *end = str+4;
+
+        uint8_t *aux = bam_aux_get(b, str+1);
+        if (aux) {
+            switch (*aux) {
+            case 'Z':
+            case 'H':
+                res->is_str = 1;
+                kputs((char *)aux+1, ks_clear(&res->s));
+                break;
+
+            case 'A':
+                res->is_str = 1;
+                kputsn((char *)aux+1, 1, ks_clear(&res->s));
+                break;
+
+            case 'i': case 'I':
+            case 's': case 'S':
+            case 'c': case 'C':
+                res->is_str = 0;
+                res->d = bam_aux2i(aux);
+                break;
+
+            case 'f':
+            case 'd':
+                res->is_str = 0;
+                res->d = bam_aux2f(aux);
+                break;
+
+            default:
+                // unsupported
+                return -1;
+            }
+
+        } else {
+            // absent tags are defined as a nul string
+            res->is_str = 1;
+            res->s.l = 0;
+        }
 
     } else {
         return -1;
@@ -245,10 +287,15 @@ static int process_aln(const sam_hdr_t *h, bam1_t *b, samview_settings_t* settin
 
     if (settings->match_expr) {
         fexpr_t res;
-        if (evaluate_filter(b, bam_sym_lookup, settings->match_expr, &res))
+        if (evaluate_filter(b, bam_sym_lookup, settings->match_expr, &res)) {
+            print_error("view", "Couldn't parse expression: \"%s\"",
+                        settings->match_expr);
+            fexpr_free(&res);
             return -1;
+        }
+        int ret = (res.is_str ? res.s.l>0 : res.d) ? 0 : 1;
         fexpr_free(&res);
-        return (res.is_str ? res.s.l>0 : res.d) ? 0 : 1;
+        return ret;
     }
 
     return 0;

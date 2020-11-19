@@ -47,9 +47,20 @@ int lookup(void *data, char *str, char **end, fexpr_t *res) {
         *end = str+1;
 	res->d = c;
     } else if (strncmp(str, "magic", 5) == 0) {
+        // non-empty string
         *end = str+5;
         res->is_str = 1;
         kputs("plugh", ks_clear(&res->s));
+    } else if (strncmp(str, "empty", 5) == 0) {
+        // empty string
+        *end = str+5;
+        res->is_str = 1;
+        kputs("", ks_clear(&res->s));
+    } else if (strncmp(str, "null", 4) == 0) {
+        // null string (eg aux:Z tag is absent)
+        *end = str+4;
+        res->is_str = 1;
+        ks_clear(&res->s);
     } else {
 	return -1;
     }
@@ -148,7 +159,8 @@ int test(void) {
         {  1, NULL, "((2*3)&7) > 4"},
         {  1, NULL, "((2*3)&7) > 4 && 2*2 <= 4"},
 
-        {  0, "plugh", "magic"},
+        {  1, "plugh", "magic"},
+        {  1, "",   "empty"},
         {  1, NULL, "magic == \"plugh\""},
         {  1, NULL, "magic != \"xyzzy\""},
         {  1, NULL, "\"abbc\" =~ \"^a+b+c+$\""},
@@ -166,9 +178,10 @@ int test(void) {
 	    return 1;
 	}
 
-        if (r.is_str && strcmp(r.s.s, tests[i].sval) != 0) {
-            fprintf(stderr, "Failed test: %s == %s, got %s\n",
-                    tests[i].str, tests[i].sval, r.s.s);
+        if (r.is_str && (strcmp(r.s.s, tests[i].sval) != 0
+                         || r.d != tests[i].dval)) {
+            fprintf(stderr, "Failed test: %s == %s, got %s, %f\n",
+                    tests[i].str, tests[i].sval, r.s.s, r.d);
             return 1;
         } else if (!r.is_str && r.d != tests[i].dval) {
             fprintf(stderr, "Failed test: %s == %f, got %f\n",
@@ -187,13 +200,13 @@ int main(int argc, char **argv) {
 	fexpr_t v;
         int err = evaluate_filter(NULL, lookup, argv[1], &v);
 	if (v.is_str)
-	    printf("expr = \"%s\"\n", v.s.s);
+	    printf("expr = \"%s\" (d=%f)\n", v.s.s, v.d);
 	else
 	    printf("expr = %f\n", v.d);
         printf("err = %d\n", err);
 
         fexpr_free(&v);
-        return 0;
+        return v.d ? 0 : 1;
     }
 
     return test();

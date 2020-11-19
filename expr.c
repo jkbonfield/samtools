@@ -140,8 +140,8 @@ static int unary_expr(void *data, sym_func *f,
 	res->d = -res->d;
     } else if (*str == '!') {
         err = unary_expr(data, f, str+1, end, res);
-	err |= res->is_str;
-	res->d = !(int64_t)res->d;
+	res->d = res->is_str ? res->s.l == 0 : !(int64_t)res->d;
+	res->is_str = 0;
     } else if (*str == '~') {
 	err = unary_expr(data, f, str+1, end, res);
 	err |= res->is_str;
@@ -297,15 +297,15 @@ static int eq_expr(void *data, sym_func *f,
 	// TODO: add =~ for strings
 	err = eq_expr(data, f, str+2, end, &val);
 	err |= (res->is_str != val.is_str);
-	res->d = res->is_str
-	    ? strcmp(res->s.s, val.s.s)==0
+	res->d = res->is_str && !err
+	    ? (res->s.l ? strcmp(res->s.s, val.s.s)==0 : 0)
 	    : res->d == val.d;
 	res->is_str = 0;
     } else if (strncmp(str, "!=", 2) == 0) {
 	err = eq_expr(data, f, str+2, end, &val);
 	err |= (res->is_str != val.is_str);
-	res->d = res->is_str
-	    ? strcmp(res->s.s, val.s.s)!=0
+	res->d = res->is_str && !err
+	    ? (res->s.l ? strcmp(res->s.s, val.s.s)!=0 : 1)
 	    : res->d != val.d;
 	res->is_str = 0;
     } else if (strncmp(str, "=~", 2) == 0 || strncmp(str, "!~", 2) == 0) {
@@ -314,21 +314,26 @@ static int eq_expr(void *data, sym_func *f,
 	    fexpr_free(&val);
 	    return -1;
 	}
-	regex_t preg;
-	int ec;
-	// FIXME: cache compiled regexp
-	if ((ec = regcomp(&preg, val.s.s, REG_EXTENDED | REG_NOSUB)) != 0) {
-	    char errbuf[1024];
-	    regerror(ec, &preg, errbuf, 1024);
-	    fprintf(stderr, "Failed regex: %.1024s\n", errbuf);
-	    fexpr_free(&val);
-	    return -1;
+	if (val.s.l && res->s.l) {
+	    // FIXME: cache compiled regexp
+	    regex_t preg;
+	    int ec;
+	    if ((ec = regcomp(&preg, val.s.s, REG_EXTENDED | REG_NOSUB)) != 0) {
+		char errbuf[1024];
+		regerror(ec, &preg, errbuf, 1024);
+		fprintf(stderr, "Failed regex: %.1024s\n", errbuf);
+		fexpr_free(&val);
+		return -1;
+	    }
+	    res->d = regexec(&preg, res->s.s, 0, NULL, 0) == 0
+		? *str == '='  // matcn
+		: *str == '!'; // no-match
+	    res->is_str = 0;
+	    regfree(&preg);
+	} else {
+	    // nul regexp or input is considered false
+	    res->s.l = 0;
 	}
-	res->d = regexec(&preg, res->s.s, 0, NULL, 0) == 0
-	    ? *str == '='  // matcn
-	    : *str == '!'; // no-match
-	res->is_str = 0;
-	regfree(&preg);
     }
     fexpr_free(&val);
 
@@ -436,10 +441,12 @@ static int and_expr(void *data, sym_func *f,
 	    if (bitor_expr(data, f, str+2, end, &val)) return -1;
 	    res->d = ((res->is_str && res->s.l) || res->d)
 		  && ((val.is_str && val.s.l) || val.d);
+	    res->is_str = 0;
 	} else if (strncmp(str, "||", 2) == 0) {
 	    if (bitor_expr(data, f, str+2, end, &val)) return -1;
 	    res->d = (res->is_str && res->s.l) || res->d
 		  || (val.is_str  && val.s.s ) || val.d;
+	    res->is_str = 0;
 	} else {
             break;
 	}
@@ -466,6 +473,12 @@ int evaluate_filter(void *data, sym_func *f, char *str, fexpr_t *res) {
         fprintf(stderr, "Unable to parse expression at %s\n", str);
         return -1;
     }
+
+    // Strings evaluate to true.  An empty string is also true, but an
+    // absent (null) string is false.  An empty string has kstring length
+    // of zero, but a pointer as it's nul-terminated.
+    if (res->is_str)
+	res->d = res->s.s != NULL;
 
     return 0;
 }
