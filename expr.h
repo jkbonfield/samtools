@@ -25,12 +25,21 @@ DEALINGS IN THE SOFTWARE.  */
 #ifndef EXPR_H
 #define EXPR_H
 
+#include <htslib/kstring.h>
+
 typedef struct {
-    char  *s; // non-null implies use this
-    double d; // otherwise this
+    int is_str;   // Use .s vs .d
+    kstring_t s;  // is_str and empty s permitted (eval as false)
+    double d;     // otherwise this
 } fexpr_t;
+
+#define FEXPR_INIT {0, KS_INITIALIZE, 0}
 
 typedef int (sym_func)(void *data, char *str, char **end, fexpr_t *res);
 int evaluate_filter(void *data, sym_func *f, char *str, fexpr_t *res);
+
+static inline void fexpr_free(fexpr_t *f) {
+    ks_free(&f->s);
+}
 
 #endif /* EXPR_H */

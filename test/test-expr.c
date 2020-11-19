@@ -33,7 +33,7 @@ int lookup(void *data, char *str, char **end, fexpr_t *res) {
     int a = 1;
     int b = 2;
     int c = 3;
-    res->s = NULL;
+    res->is_str = 0;
     if (strncmp(str, "foo", 3) == 0) {
         *end = str+3;
 	res->d = foo;
@@ -46,6 +46,10 @@ int lookup(void *data, char *str, char **end, fexpr_t *res) {
     } else if (*str == 'c') {
         *end = str+1;
 	res->d = c;
+    } else if (strncmp(str, "magic", 5) == 0) {
+        *end = str+5;
+        res->is_str = 1;
+        kputs("plugh", ks_clear(&res->s));
     } else {
 	return -1;
     }
@@ -54,94 +58,103 @@ int lookup(void *data, char *str, char **end, fexpr_t *res) {
 }
 
 typedef struct {
-    double val;
+    double dval;
+    char *sval;
     char *str;
 } test_ev;
 
 int test(void) {
     // These are all valid expressions that should work
     test_ev tests[] = {
-        {  1, "1"},
-        {  1, "+1"},
-        { -1, "-1"},
-        {  0, "!7"},
-        {  1, "!0"},
-        {  1, "!(!7)"},
-        {  1, "!!7"},
+        {  1, NULL, "1"},
+        {  1, NULL, "+1"},
+        { -1, NULL, "-1"},
+        {  0, NULL, "!7"},
+        {  1, NULL, "!0"},
+        {  1, NULL, "!(!7)"},
+        {  1, NULL, "!!7"},
 
-        {  5, "2+3"},
-        { -1, "2+-3"},
-        {  6, "1+2+3"},
-        {  1, "-2+3"},
+        {  5, NULL, "2+3"},
+        { -1, NULL, "2+-3"},
+        {  6, NULL, "1+2+3"},
+        {  1, NULL, "-2+3"},
 
-        {  6, "2*3"},
-        {  6, "1*2*3"},
-        {  0, "2*0"},
+        {  6, NULL, "2*3"},
+        {  6, NULL, "1*2*3"},
+        {  0, NULL, "2*0"},
 
-        {  7, "(7)"},
-        {  7, "((7))"},
-        { 21, "(1+2)*(3+4)"},
-        { 14, "(4*5)-(-2*-3)"},
+        {  7, NULL, "(7)"},
+        {  7, NULL, "((7))"},
+        { 21, NULL, "(1+2)*(3+4)"},
+        { 14, NULL, "(4*5)-(-2*-3)"},
 
-	{  1, "(1+2)*3==9"},
-	{  1, "(1+2)*3!=8"},
-	{  0, "(1+2)*3!=9"},
-	{  0, "(1+2)*3==8"},
+	{  1, NULL, "(1+2)*3==9"},
+	{  1, NULL, "(1+2)*3!=8"},
+	{  0, NULL, "(1+2)*3!=9"},
+	{  0, NULL, "(1+2)*3==8"},
 
-        {  0, "1>2"},
-        {  1, "1<2"},
-        {  0, "3<3"},
-        {  0, "3>3"},
-        {  1, "9<=9"},
-        {  1, "9>=9"},
-        {  1, "2*4==8"},
-        {  1, "16==0x10"},
-        {  1, "15<0x10"},
-        {  1, "17>0x10"},
-        {  0, "2*4!=8"},
-        {  1, "4+2<3+4"},
-        {  0, "4*2<3+4"},
-        {  8, "4*(2<3)+4"},  // boolean; 4*(1)+4
+        {  0, NULL, "1>2"},
+        {  1, NULL, "1<2"},
+        {  0, NULL, "3<3"},
+        {  0, NULL, "3>3"},
+        {  1, NULL, "9<=9"},
+        {  1, NULL, "9>=9"},
+        {  1, NULL, "2*4==8"},
+        {  1, NULL, "16==0x10"},
+        {  1, NULL, "15<0x10"},
+        {  1, NULL, "17>0x10"},
+        {  0, NULL, "2*4!=8"},
+        {  1, NULL, "4+2<3+4"},
+        {  0, NULL, "4*2<3+4"},
+        {  8, NULL, "4*(2<3)+4"},  // boolean; 4*(1)+4
 
-	{  1, "(1<2) == (3>2)"},
-	{  1, "1<2 == 3>2"},
+	{  1, NULL, "(1<2) == (3>2)"},
+	{  1, NULL, "1<2 == 3>2"},
 
-        {  1, "2 && 1"},
-        {  0, "2 && 0"},
-        {  0, "0 && 2"},
-        {  1, "2 || 1"},
-        {  1, "2 || 0"},
-        {  1, "0 || 2"},
-        {  1, "1 || 2 && 3"},
-        {  1, "2 && 3 || 1"},
-        {  1, "0 && 3 || 2"},
-        {  0, "0 && 3 || 0"},
+        {  1, NULL, "2 && 1"},
+        {  0, NULL, "2 && 0"},
+        {  0, NULL, "0 && 2"},
+        {  1, NULL, "2 || 1"},
+        {  1, NULL, "2 || 0"},
+        {  1, NULL, "0 || 2"},
+        {  1, NULL, "1 || 2 && 3"},
+        {  1, NULL, "2 && 3 || 1"},
+        {  1, NULL, "0 && 3 || 2"},
+        {  0, NULL, "0 && 3 || 0"},
 
-        {  1, "3 & 1"},
-        {  2, "3 & 2"},
-        {  3, "1 | 2"},
-        {  3, "1 | 3"},
-        {  7, "1 | 6"},
-        {  2, "1 ^ 3"},
+        {  1, NULL, "3 & 1"},
+        {  2, NULL, "3 & 2"},
+        {  3, NULL, "1 | 2"},
+        {  3, NULL, "1 | 3"},
+        {  7, NULL, "1 | 6"},
+        {  2, NULL, "1 ^ 3"},
 
-	{  1, "(1^0)&(4^3)"},
-	{  2, "1 ^(0&4)^ 3"},
-	{  2, "1 ^ 0&4 ^ 3"},  // precedence, & before ^
+	{  1, NULL, "(1^0)&(4^3)"},
+	{  2, NULL, "1 ^(0&4)^ 3"},
+	{  2, NULL, "1 ^ 0&4 ^ 3"},  // precedence, & before ^
 
-	{  6, "(1|0)^(4|3)"},
-	{  7, "1 |(0^4)| 3"},
-	{  7, "1 | 0^4 | 3"},  // precedence, ^ before |
+	{  6, NULL, "(1|0)^(4|3)"},
+	{  7, NULL, "1 |(0^4)| 3"},
+	{  7, NULL, "1 | 0^4 | 3"},  // precedence, ^ before |
 
-	{  1, "4 & 2 || 1"},
-	{  1, "(4 & 2) || 1"},
-	{  0, "4 & (2 || 1)"},
-	{  1, "1 || 4 & 2"},
-	{  1, "1 || (4 & 2)"},
-	{  0, "(1 || 4) & 2"},
+	{  1, NULL, "4 & 2 || 1"},
+	{  1, NULL, "(4 & 2) || 1"},
+	{  0, NULL, "4 & (2 || 1)"},
+	{  1, NULL, "1 || 4 & 2"},
+	{  1, NULL, "1 || (4 & 2)"},
+	{  0, NULL, "(1 || 4) & 2"},
 
-        {  0, " (2*3)&7  > 4"},
-        {  1, "((2*3)&7) > 4"},
-        {  1, "((2*3)&7) > 4 && 2*2 <= 4"},
+        {  0, NULL, " (2*3)&7  > 4"},
+        {  1, NULL, "((2*3)&7) > 4"},
+        {  1, NULL, "((2*3)&7) > 4 && 2*2 <= 4"},
+
+        {  0, "plugh", "magic"},
+        {  1, NULL, "magic == \"plugh\""},
+        {  1, NULL, "magic != \"xyzzy\""},
+        {  1, NULL, "\"abbc\" =~ \"^a+b+c+$\""},
+        {  0, NULL, "\"aBBc\" =~ \"^a+b+c+$\""},
+        {  1, NULL, "\"aBBc\" !~ \"^a+b+c+$\""},
+        {  1, NULL, "\"xyzzy plugh abracadabra\" =~ magic"},
     };
 
     int i;
@@ -153,11 +166,17 @@ int test(void) {
 	    return 1;
 	}
 
-	if (r.d != tests[i].val) {
+        if (r.is_str && strcmp(r.s.s, tests[i].sval) != 0) {
+            fprintf(stderr, "Failed test: %s == %s, got %s\n",
+                    tests[i].str, tests[i].sval, r.s.s);
+            return 1;
+        } else if (!r.is_str && r.d != tests[i].dval) {
             fprintf(stderr, "Failed test: %s == %f, got %f\n",
-                    tests[i].str, tests[i].val, r.d);
+                    tests[i].str, tests[i].dval, r.d);
             return 1;
         }
+
+        fexpr_free(&r);
     }
 
     return 0;
@@ -167,11 +186,13 @@ int main(int argc, char **argv) {
     if (argc > 1) {
 	fexpr_t v;
         int err = evaluate_filter(NULL, lookup, argv[1], &v);
-	if (v.s)
-	    printf("expr = \"%s\"\n", v.s);
+	if (v.is_str)
+	    printf("expr = \"%s\"\n", v.s.s);
 	else
 	    printf("expr = %f\n", v.d);
         printf("err = %d\n", err);
+
+        fexpr_free(&v);
         return 0;
     }
 

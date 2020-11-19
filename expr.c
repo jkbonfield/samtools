@@ -95,28 +95,20 @@ static int simple_expr(void *data, sym_func *f,
     // FIXME: update this if/when we migrate this from samtools to htslib.
     double d = strtod(str, end);
     if (str != *end) {
-	res->s = NULL;
+	res->is_str = 0;
 	res->d = d;
     } else {
 	// Not valid floating point syntax.
 	// FIXME: add function call names in here; len(), sqrt(), pow(), etc
 	if (*str == '"') {
 	    // string.  FIXME: cope with backslashes at some point.
-	    res->s = str+1;
+	    res->is_str = 1;
 	    char *e = str+1;
 	    while (*e && *e != '"')
 		e++;
 
-	    // FIXME: this modifies the query string.
-	    // Alternatives are taking a copy and all the memory allocation
-	    // bits that go with it, or storing string plus length.
-	    //
-	    // If we want to cope with escaping rules (\" etc) then
-	    // kstring as one of the types is probably more robust.
-	    if (*e == '"')
-		*e++ = 0;
-
-	    *end = e;
+	    kputsn(str+1, e-(str+1), ks_clear(&res->s));
+	    *end = e + (*e == '"');
 	} else if (f)
 	    // Look up variable
 	    return f(data, str, end, res);
@@ -141,18 +133,18 @@ static int unary_expr(void *data, sym_func *f,
     str = ws(str);
     if (*str == '+') {
         err = simple_expr(data, f, str+1, end, res);
-	err |= res->s != NULL;
+	err |= res->is_str;
     } else if (*str == '-') {
         err = simple_expr(data, f, str+1, end, res);
-	err |= res->s != NULL;
+	err |= res->is_str;
 	res->d = -res->d;
     } else if (*str == '!') {
         err = unary_expr(data, f, str+1, end, res);
-	err |= res->s != NULL;
+	err |= res->is_str;
 	res->d = !(int64_t)res->d;
     } else if (*str == '~') {
 	err = unary_expr(data, f, str+1, end, res);
-	err |= res->s != NULL;
+	err |= res->is_str;
         res->d = ~(int64_t)res->d;
     } else {
         err = simple_expr(data, f, str, end, res);
@@ -175,12 +167,15 @@ static int mul_expr(void *data, sym_func *f,
 	return -1;
 
     str = *end;
+    fexpr_t val = FEXPR_INIT;
     while (*str) {
-	fexpr_t val = {NULL, 0};
         str = ws(str);
 	if (*str == '*' || *str == '/' || *str == '%') {
             if (unary_expr(data, f, str+1, end, &val)) return -1;
-	    if (val.s || res->s) return -1; // arith on strings
+	    if (val.is_str || res->is_str) {
+		fexpr_free(&val);
+		return -1; // arith on strings
+	    }
 	}
 
         if (*str == '*')
@@ -194,6 +189,7 @@ static int mul_expr(void *data, sym_func *f,
 
         str = *end;
     }
+    fexpr_free(&val);
 
     return 0;
 }
@@ -211,12 +207,15 @@ static int add_expr(void *data, sym_func *f,
 	return -1;
 
     str = *end;
+    fexpr_t val = FEXPR_INIT;
     while (*str) {
-	fexpr_t val = {NULL, 0};
         str = ws(str);
 	if (*str == '+' || *str == '-') {
             if (mul_expr(data, f, str+1, end, &val)) return -1;
-	    if (val.s || res->s) return -1; // arith on strings
+	    if (val.is_str || res->is_str) {
+		fexpr_free(&val);
+		return -1; // arith on strings
+	    }
 	}
 
         if (*str == '+')
@@ -228,6 +227,7 @@ static int add_expr(void *data, sym_func *f,
 
         str = *end;
     }
+    fexpr_free(&val);
 
     return 0;
 }
@@ -245,7 +245,7 @@ static int cmp_expr(void *data, sym_func *f,
     if (add_expr(data, f, str, end, res)) return -1;
 
     str = ws(*end);
-    fexpr_t val = {NULL, 0};
+    fexpr_t val = FEXPR_INIT;
     int err = 0, numeric = 1;
 
     // Maybe consider > and < on strings.
@@ -265,8 +265,9 @@ static int cmp_expr(void *data, sym_func *f,
     } else {
 	numeric = 0;
     }
+    fexpr_free(&val);
 
-    if (numeric && (val.s || res->s))
+    if (numeric && (val.is_str || res->is_str))
 	return -1;
 
     return err ? -1 : 0;
@@ -285,60 +286,51 @@ static int eq_expr(void *data, sym_func *f,
     if (cmp_expr(data, f, str, end, res)) return -1;
 
     str = ws(*end);
-#if 1
+
     int err = 0;
-    fexpr_t val = {NULL, 0};
+    fexpr_t val = FEXPR_INIT;
+
+    // numeric vs numeric comparison is as expected
+    // string vs string comparison is as expected
+    // numeric vs string is an error
     if (strncmp(str, "==", 2) == 0) {
 	// TODO: add =~ for strings
 	err = eq_expr(data, f, str+2, end, &val);
-	res->d = res->s && val.s
-	    ? strcmp(res->s, val.s)==0
-	    : (res->s || val.s) ? 0 : res->d == val.d;
-	res->s = NULL;
+	err |= (res->is_str != val.is_str);
+	res->d = res->is_str
+	    ? strcmp(res->s.s, val.s.s)==0
+	    : res->d == val.d;
+	res->is_str = 0;
     } else if (strncmp(str, "!=", 2) == 0) {
 	err = eq_expr(data, f, str+2, end, &val);
-	res->d = res->s && val.s
-	    ? strcmp(res->s, val.s)!=0
-	    : (res->s || val.s) ? 0 : res->d != val.d;
-	res->s = NULL;
+	err |= (res->is_str != val.is_str);
+	res->d = res->is_str
+	    ? strcmp(res->s.s, val.s.s)!=0
+	    : res->d != val.d;
+	res->is_str = 0;
     } else if (strncmp(str, "=~", 2) == 0 || strncmp(str, "!~", 2) == 0) {
 	err = eq_expr(data, f, str+2, end, &val);
-	if (!val.s || !res->s) return -1;
+	if (!val.is_str || !res->is_str) {
+	    fexpr_free(&val);
+	    return -1;
+	}
 	regex_t preg;
 	int ec;
 	// FIXME: cache compiled regexp
-	if ((ec = regcomp(&preg, val.s, REG_EXTENDED | REG_NOSUB)) != 0) {
+	if ((ec = regcomp(&preg, val.s.s, REG_EXTENDED | REG_NOSUB)) != 0) {
 	    char errbuf[1024];
 	    regerror(ec, &preg, errbuf, 1024);
 	    fprintf(stderr, "Failed regex: %.1024s\n", errbuf);
+	    fexpr_free(&val);
 	    return -1;
 	}
-	res->d = regexec(&preg, res->s, 0, NULL, 0) == 0
+	res->d = regexec(&preg, res->s.s, 0, NULL, 0) == 0
 	    ? *str == '='  // matcn
 	    : *str == '!'; // no-match
-	res->s = NULL;
+	res->is_str = 0;
 	regfree(&preg);
     }
-
-#else
-// For friendliness sake and the fact we're using fexpr_ts for representing
-// integers, treat equality as within a small amount.  If we had a more
-// expressive language we could do away with this perhaps.
-// Eg 100.0/17*15*17/15 == 100
-#define DBL_DELTA (DBL_EPSILON*100)  // approx 2e-14
-
-    int n = 1;
-    if (strncmp(str, "==", 2) == 0)
-        ret -= eq_expr(data, f, str+2, end, err);
-    else if (*str == '=') // synonym for ==
-        ret -= eq_expr(data, f, str+1, end, err);
-    else if (strncmp(str, "!=", 2) == 0)
-        ret -= eq_expr(data, f, str+2, end, err), n=0;
-    else
-	return *err ? -1 : ret;
-
-    ret = ret >= -DBL_DELTA && ret <= DBL_DELTA ? n : 1-n;
-#endif
+    fexpr_free(&val);
 
     return err ? -1 : 0;
 }
@@ -352,17 +344,21 @@ static int bitand_expr(void *data, sym_func *f,
 		       char *str, char **end, fexpr_t *res) {
     if (eq_expr(data, f, str, end, res)) return -1;
 
+    fexpr_t val = FEXPR_INIT;
     for (;;) {
         str = ws(*end);
         if (*str == '&' && str[1] != '&') {
-	    fexpr_t val = {NULL, 0};
 	    if (eq_expr(data, f, str+1, end, &val)) return -1;
-	    if (res->s || val.s) return -1;
+	    if (res->is_str || val.is_str) {
+		fexpr_free(&val);
+		return -1;
+	    }
 	    res->d = (int64_t)res->d & (int64_t)val.d;
 	} else {
             break;
 	}
     }
+    fexpr_free(&val);
 
     return 0;
 }
@@ -376,17 +372,21 @@ static int bitxor_expr(void *data, sym_func *f,
 		       char *str, char **end, fexpr_t *res) {
     if (bitand_expr(data, f, str, end, res)) return -1;
 
+    fexpr_t val = FEXPR_INIT;
     for (;;) {
         str = ws(*end);
         if (*str == '^') {
-	    fexpr_t val = {NULL, 0};
 	    if (bitand_expr(data, f, str+1, end, &val)) return -1;
-	    if (res->s || val.s) return -1;
+	    if (res->is_str || val.is_str) {
+		fexpr_free(&val);
+		return -1;
+	    }
 	    res->d = (int64_t)res->d ^ (int64_t)val.d;
 	} else {
             break;
 	}
     }
+    fexpr_free(&val);
 
     return 0;
 }
@@ -400,17 +400,21 @@ static int bitor_expr(void *data, sym_func *f,
 		      char *str, char **end, fexpr_t *res) {
     if (bitxor_expr(data, f, str, end, res)) return -1;
 
+    fexpr_t val = FEXPR_INIT;
     for (;;) {
         str = ws(*end);
         if (*str == '|' && str[1] != '|') {
-	    fexpr_t val = {NULL, 0};
 	    if (bitxor_expr(data, f, str+1, end, &val)) return -1;
-	    if (res->s || val.s) return -1;
+	    if (res->is_str || val.is_str) {
+		fexpr_free(&val);
+		return -1;
+	    }
 	    res->d = (int64_t)res->d | (int64_t)val.d;
 	} else {
             break;
 	}
     }
+    fexpr_free(&val);
 
     return 0;
 }
@@ -425,19 +429,22 @@ static int and_expr(void *data, sym_func *f,
 		    char *str, char **end, fexpr_t *res) {
     if (bitor_expr(data, f, str, end, res)) return -1;
 
+    fexpr_t val = FEXPR_INIT;
     for (;;) {
         str = ws(*end);
-	fexpr_t val = {NULL, 0};
         if (strncmp(str, "&&", 2) == 0) {
 	    if (bitor_expr(data, f, str+2, end, &val)) return -1;
-	    res->d = (res->s || res->d) && (val.s || val.d);
+	    res->d = ((res->is_str && res->s.l) || res->d)
+		  && ((val.is_str && val.s.l) || val.d);
 	} else if (strncmp(str, "||", 2) == 0) {
 	    if (bitor_expr(data, f, str+2, end, &val)) return -1;
-	    res->d = res->s || res->d || val.s || val.d;
+	    res->d = (res->is_str && res->s.l) || res->d
+		  || (val.is_str  && val.s.s ) || val.d;
 	} else {
             break;
 	}
     }
+    fexpr_free(&val);
 
     return 0;
 }
@@ -449,6 +456,8 @@ static int expression(void *data, sym_func *f,
 
 int evaluate_filter(void *data, sym_func *f, char *str, fexpr_t *res) {
     char *end = NULL;
+
+    memset(res, 0, sizeof(*res));
 
     if (expression(data, f, str, &end, res))
 	return -1;

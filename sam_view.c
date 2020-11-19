@@ -83,7 +83,7 @@ static int bam_sym_lookup(void *data, char *str, char **end, fexpr_t *res) {
     //   would need qual returned as string / array and "avg" as data
     //   transform in the expression parser.  Then permits min, max, etc.
 
-    res->s = NULL;
+    res->is_str = 0;
     if (strncasecmp(str, "flag", 4) == 0) {
         str = *end = str+4;
         if (*str != '.') {
@@ -173,7 +173,8 @@ static int bam_sym_lookup(void *data, char *str, char **end, fexpr_t *res) {
 
     } else if (strncasecmp(str, "name", 4) == 0) {
         *end = str+4;
-        res->s = bam_get_qname(b);
+        res->is_str = 1;
+        kputs(bam_get_qname(b), &res->s);
 
     } else {
         return -1;
@@ -246,7 +247,8 @@ static int process_aln(const sam_hdr_t *h, bam1_t *b, samview_settings_t* settin
         fexpr_t res;
         if (evaluate_filter(b, bam_sym_lookup, settings->match_expr, &res))
             return -1;
-        return res.s || res.d ? 0 : 1;
+        fexpr_free(&res);
+        return (res.is_str ? res.s.l>0 : res.d) ? 0 : 1;
     }
 
     return 0;
