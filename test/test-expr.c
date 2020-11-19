@@ -163,6 +163,17 @@ int test(void) {
         {  1, "",   "empty"},
         {  1, NULL, "magic == \"plugh\""},
         {  1, NULL, "magic != \"xyzzy\""},
+
+        {  1, NULL, "\"abc\" < \"def\""},
+        {  1, NULL, "\"abc\" <= \"abc\""},
+        {  0, NULL, "\"abc\" < \"ab\""},
+        {  0, NULL, "\"abc\" <= \"ab\""},
+
+        {  0, NULL, "\"abc\" > \"def\""},
+        {  1, NULL, "\"abc\" >= \"abc\""},
+        {  1, NULL, "\"abc\" > \"ab\""},
+        {  1, NULL, "\"abc\" >= \"ab\""},
+
         {  1, NULL, "\"abbc\" =~ \"^a+b+c+$\""},
         {  0, NULL, "\"aBBc\" =~ \"^a+b+c+$\""},
         {  1, NULL, "\"aBBc\" !~ \"^a+b+c+$\""},

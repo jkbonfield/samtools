@@ -182,6 +182,8 @@ static int bam_sym_lookup(void *data, char *str, char **end, fexpr_t *res) {
 
         uint8_t *aux = bam_aux_get(b, str+1);
         if (aux) {
+            // we define the truth of a tag to be its presence, even if 0.
+            res->is_true = 1;
             switch (*aux) {
             case 'Z':
             case 'H':
@@ -213,9 +215,11 @@ static int bam_sym_lookup(void *data, char *str, char **end, fexpr_t *res) {
             }
 
         } else {
-            // absent tags are defined as a nul string
+            // hence absent tags are always false (and strings)
             res->is_str = 1;
             res->s.l = 0;
+            res->d = 0;
+            res->is_true = 0;
         }
 
     } else {
@@ -293,7 +297,7 @@ static int process_aln(const sam_hdr_t *h, bam1_t *b, samview_settings_t* settin
             fexpr_free(&res);
             return -1;
         }
-        int ret = (res.is_str ? res.s.l>0 : res.d) ? 0 : 1;
+        int ret = res.is_true ? 0 : 1;
         fexpr_free(&res);
         return ret;
     }

@@ -27,13 +27,22 @@ DEALINGS IN THE SOFTWARE.  */
 
 #include <htslib/kstring.h>
 
+// fexpr_t is our return type and the type for elements within the expr.
+// Note we cope with zero-but-true in order to implement a basic
+// "exists(something)" check where "something" may even be zero.
+//
+// Eg in the aux tag searching syntax, "[NM]" should return true if
+// NM tag exists even if zero.
+// Take care when negating this. "[NM] != 0" will be true when
+// [NM] is absent, thus consider "[NM] && [NM] != 0".
 typedef struct {
-    int is_str;   // Use .s vs .d
+    char is_str;  // Use .s vs .d
+    char is_true; // Force true if even zero
     kstring_t s;  // is_str and empty s permitted (eval as false)
     double d;     // otherwise this
 } fexpr_t;
 
-#define FEXPR_INIT {0, KS_INITIALIZE, 0}
+#define FEXPR_INIT {0, 0, KS_INITIALIZE, 0}
 
 typedef int (sym_func)(void *data, char *str, char **end, fexpr_t *res);
 int evaluate_filter(void *data, sym_func *f, char *str, fexpr_t *res);

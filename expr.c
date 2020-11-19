@@ -134,18 +134,26 @@ static int unary_expr(void *data, sym_func *f,
     if (*str == '+') {
         err = simple_expr(data, f, str+1, end, res);
 	err |= res->is_str;
+	res->is_true = res->d != 0;
     } else if (*str == '-') {
         err = simple_expr(data, f, str+1, end, res);
 	err |= res->is_str;
 	res->d = -res->d;
+	res->is_true = res->d != 0;
     } else if (*str == '!') {
         err = unary_expr(data, f, str+1, end, res);
-	res->d = res->is_str ? res->s.l == 0 : !(int64_t)res->d;
-	res->is_str = 0;
+	if (res->is_str) {
+	    res->is_str = 0;
+	    res->d = 0;
+	} else {
+	    res->d = !(int64_t)res->d;
+	}
+	res->is_true = !res->is_true;
     } else if (*str == '~') {
 	err = unary_expr(data, f, str+1, end, res);
 	err |= res->is_str;
         res->d = ~(int64_t)res->d;
+	res->is_true = !res->is_true;
     } else {
         err = simple_expr(data, f, str, end, res);
     }
@@ -246,29 +254,34 @@ static int cmp_expr(void *data, sym_func *f,
 
     str = ws(*end);
     fexpr_t val = FEXPR_INIT;
-    int err = 0, numeric = 1;
+    int err = 0;
 
-    // Maybe consider > and < on strings.
-    // eg "abba" < "acdc"?
     if (strncmp(str, ">=", 2) == 0) {
 	err = cmp_expr(data, f, str+2, end, &val);
-	res->d = res->d >= val.d;
+	res->is_true = res->d = res->is_str && res->s.s && val.is_str && val.s.s
+	    ? strcmp(res->s.s, val.s.s) >= 0
+	    : !res->is_str && !val.is_str && res->d >= val.d;
+	res->is_str = 0;
     } else if (*str == '>') {
 	err = cmp_expr(data, f, str+1, end, &val);
-	res->d = res->d > val.d;
+	res->is_true = res->d = res->is_str && res->s.s && val.is_str && val.s.s
+	    ? strcmp(res->s.s, val.s.s) > 0
+	    : !res->is_str && !val.is_str && res->d > val.d;
+	res->is_str = 0;
     } else if (strncmp(str, "<=", 2) == 0) {
 	err = cmp_expr(data, f, str+2, end, &val);
-	res->d = res->d <= val.d;
+	res->is_true = res->d = res->is_str && res->s.s && val.is_str && val.s.s
+	    ? strcmp(res->s.s, val.s.s) <= 0
+	    : !res->is_str && !val.is_str && res->d <= val.d;
+	res->is_str = 0;
     } else if (*str == '<') {
 	err = cmp_expr(data, f, str+1, end, &val);
-	res->d = res->d < val.d;
-    } else {
-	numeric = 0;
+	res->is_true = res->d = res->is_str && res->s.s && val.is_str && val.s.s
+	    ? strcmp(res->s.s, val.s.s) < 0
+	    : !res->is_str && !val.is_str && res->d < val.d;
+	res->is_str = 0;
     }
     fexpr_free(&val);
-
-    if (numeric && (val.is_str || res->is_str))
-	return -1;
 
     return err ? -1 : 0;
 }
@@ -292,29 +305,34 @@ static int eq_expr(void *data, sym_func *f,
 
     // numeric vs numeric comparison is as expected
     // string vs string comparison is as expected
-    // numeric vs string is an error
+    // numeric vs string is false
     if (strncmp(str, "==", 2) == 0) {
-	// TODO: add =~ for strings
-	err = eq_expr(data, f, str+2, end, &val);
-	err |= (res->is_str != val.is_str);
-	res->d = res->is_str && !err
-	    ? (res->s.l ? strcmp(res->s.s, val.s.s)==0 : 0)
-	    : res->d == val.d;
+	if ((err = eq_expr(data, f, str+2, end, &val))) {
+	    res->is_true = res->d = 0;
+	} else {
+	    res->is_true = res->d = res->is_str
+		? (res->s.s && val.s.s ? strcmp(res->s.s, val.s.s)==0 : 0)
+		: !res->is_str && !val.is_str && res->d == val.d;
+	}
 	res->is_str = 0;
+
     } else if (strncmp(str, "!=", 2) == 0) {
-	err = eq_expr(data, f, str+2, end, &val);
-	err |= (res->is_str != val.is_str);
-	res->d = res->is_str && !err
-	    ? (res->s.l ? strcmp(res->s.s, val.s.s)!=0 : 1)
-	    : res->d != val.d;
+	if ((err = eq_expr(data, f, str+2, end, &val))) {
+	    res->is_true = res->d = 0;
+	} else {
+	    res->is_true = res->d = res->is_str
+		? (res->s.s && val.s.s ? strcmp(res->s.s, val.s.s) != 0 : 1)
+		: res->is_str != val.is_str || res->d != val.d;
+	}
 	res->is_str = 0;
+
     } else if (strncmp(str, "=~", 2) == 0 || strncmp(str, "!~", 2) == 0) {
 	err = eq_expr(data, f, str+2, end, &val);
 	if (!val.is_str || !res->is_str) {
 	    fexpr_free(&val);
 	    return -1;
 	}
-	if (val.s.l && res->s.l) {
+	if (val.s.s && res->s.s && val.is_true >= 0 && res->is_true >= 0) {
 	    // FIXME: cache compiled regexp
 	    regex_t preg;
 	    int ec;
@@ -325,15 +343,15 @@ static int eq_expr(void *data, sym_func *f,
 		fexpr_free(&val);
 		return -1;
 	    }
-	    res->d = regexec(&preg, res->s.s, 0, NULL, 0) == 0
+	    res->is_true = res->d = regexec(&preg, res->s.s, 0, NULL, 0) == 0
 		? *str == '='  // matcn
 		: *str == '!'; // no-match
-	    res->is_str = 0;
 	    regfree(&preg);
 	} else {
 	    // nul regexp or input is considered false
-	    res->s.l = 0;
+	    res->is_true = 0;
 	}
+	res->is_str = 0;
     }
     fexpr_free(&val);
 
@@ -358,7 +376,7 @@ static int bitand_expr(void *data, sym_func *f,
 		fexpr_free(&val);
 		return -1;
 	    }
-	    res->d = (int64_t)res->d & (int64_t)val.d;
+	    res->is_true = res->d = (int64_t)res->d & (int64_t)val.d;
 	} else {
             break;
 	}
@@ -386,7 +404,7 @@ static int bitxor_expr(void *data, sym_func *f,
 		fexpr_free(&val);
 		return -1;
 	    }
-	    res->d = (int64_t)res->d ^ (int64_t)val.d;
+	    res->is_true = res->d = (int64_t)res->d ^ (int64_t)val.d;
 	} else {
             break;
 	}
@@ -414,7 +432,7 @@ static int bitor_expr(void *data, sym_func *f,
 		fexpr_free(&val);
 		return -1;
 	    }
-	    res->d = (int64_t)res->d | (int64_t)val.d;
+	    res->is_true = res->d = (int64_t)res->d | (int64_t)val.d;
 	} else {
             break;
 	}
@@ -439,13 +457,15 @@ static int and_expr(void *data, sym_func *f,
         str = ws(*end);
         if (strncmp(str, "&&", 2) == 0) {
 	    if (bitor_expr(data, f, str+2, end, &val)) return -1;
-	    res->d = ((res->is_str && res->s.l) || res->d)
-		  && ((val.is_str && val.s.l) || val.d);
+	    res->is_true = res->d =
+		(res->is_true || (res->is_str && res->s.s) || res->d) &&
+		(val.is_true  || (val.is_str && val.s.s) || val.d);
 	    res->is_str = 0;
 	} else if (strncmp(str, "||", 2) == 0) {
 	    if (bitor_expr(data, f, str+2, end, &val)) return -1;
-	    res->d = (res->is_str && res->s.l) || res->d
-		  || (val.is_str  && val.s.s ) || val.d;
+	    res->is_true = res->d =
+		res->is_true || (res->is_str && res->s.s) || res->d ||
+		val.is_true  || (val.is_str  && val.s.s ) || val.d;
 	    res->is_str = 0;
 	} else {
             break;
@@ -478,7 +498,9 @@ int evaluate_filter(void *data, sym_func *f, char *str, fexpr_t *res) {
     // absent (null) string is false.  An empty string has kstring length
     // of zero, but a pointer as it's nul-terminated.
     if (res->is_str)
-	res->d = res->s.s != NULL;
+	res->is_true = res->d = res->s.s != NULL;
+    else
+	res->is_true |= res->d != 0;
 
     return 0;
 }
