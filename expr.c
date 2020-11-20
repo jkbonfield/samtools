@@ -68,7 +68,7 @@ typedef struct sam_filter {
 
 // Skip to start of term
 static char *ws(char *str) {
-    while (*str && isspace(*str))
+    while (*str && (*str == ' ' || *str == '\t'))
         str++;
     return str;
 }
@@ -267,7 +267,7 @@ static int cmp_expr(sam_filter_t *filt, void *data, sym_func *fn,
     fexpr_t val = FEXPR_INIT;
     int err = 0;
 
-    if (strncmp(str, ">=", 2) == 0) {
+    if (*str == '>' && str[1] == '=') {
         err = cmp_expr(filt, data, fn, str+2, end, &val);
         res->is_true=res->d = res->is_str && res->s.s && val.is_str && val.s.s
             ? strcmp(res->s.s, val.s.s) >= 0
@@ -279,7 +279,7 @@ static int cmp_expr(sam_filter_t *filt, void *data, sym_func *fn,
             ? strcmp(res->s.s, val.s.s) > 0
             : !res->is_str && !val.is_str && res->d > val.d;
         res->is_str = 0;
-    } else if (strncmp(str, "<=", 2) == 0) {
+    } else if (*str == '<' && str[1] == '=') {
         err = cmp_expr(filt, data, fn, str+2, end, &val);
         res->is_true=res->d = res->is_str && res->s.s && val.is_str && val.s.s
             ? strcmp(res->s.s, val.s.s) <= 0
@@ -317,7 +317,7 @@ static int eq_expr(sam_filter_t *filt, void *data, sym_func *fn,
     // numeric vs numeric comparison is as expected
     // string vs string comparison is as expected
     // numeric vs string is false
-    if (strncmp(str, "==", 2) == 0) {
+    if (str[0] == '=' && str[1] == '=') {
         if ((err = eq_expr(filt, data, fn, str+2, end, &val))) {
             res->is_true = res->d = 0;
         } else {
@@ -327,7 +327,7 @@ static int eq_expr(sam_filter_t *filt, void *data, sym_func *fn,
         }
         res->is_str = 0;
 
-    } else if (strncmp(str, "!=", 2) == 0) {
+    } else if (str[0] == '!' && str[1] == '=') {
         if ((err = eq_expr(filt, data, fn, str+2, end, &val))) {
             res->is_true = res->d = 0;
         } else {
@@ -337,7 +337,8 @@ static int eq_expr(sam_filter_t *filt, void *data, sym_func *fn,
         }
         res->is_str = 0;
 
-    } else if (strncmp(str, "=~", 2) == 0 || strncmp(str, "!~", 2) == 0) {
+    } else if ((str[0] == '=' && str[1] == '~') ||
+	       (str[0] == '!' && str[1] == '~')) {
         err = eq_expr(filt, data, fn, str+2, end, &val);
         if (!val.is_str || !res->is_str) {
             fexpr_free(&val);
@@ -480,13 +481,13 @@ static int and_expr(sam_filter_t *filt, void *data, sym_func *fn,
     fexpr_t val = FEXPR_INIT;
     for (;;) {
         str = ws(*end);
-        if (strncmp(str, "&&", 2) == 0) {
+	if (str[0] == '&' && str[1] == '&') {
             if (bitor_expr(filt, data, fn, str+2, end, &val)) return -1;
             res->is_true = res->d =
                 (res->is_true || (res->is_str && res->s.s) || res->d) &&
                 (val.is_true  || (val.is_str && val.s.s) || val.d);
             res->is_str = 0;
-        } else if (strncmp(str, "||", 2) == 0) {
+	} else if (str[0] == '|' && str[1] == '|') {
             if (bitor_expr(filt, data, fn, str+2, end, &val)) return -1;
             res->is_true = res->d =
                 res->is_true || (res->is_str && res->s.s) || res->d ||
@@ -510,7 +511,13 @@ sam_filter_t *sam_filter_init(char *str) {
     sam_filter_t *f = calloc(1, sizeof(*f));
     if (!f) return NULL;
 
-    f->str = str;
+    // Oversize to permit faster comparisons with memcmp over strcmp
+    size_t len = strlen(str)+100;
+    if (!(f->str = malloc(len))) {
+        free(f);
+        return NULL;
+    }
+    strncpy(f->str, str, len);
     return f;
 }
 
@@ -522,6 +529,7 @@ void sam_filter_free(sam_filter_t *filt) {
     for (i = 0; i < filt->max_regex; i++)
 	regfree(&filt->preg[i]);
 
+    free(filt->str);
     free(filt);
 }
 

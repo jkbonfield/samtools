@@ -79,64 +79,60 @@ static int bam_sym_lookup(void *data, char *str, char **end, fexpr_t *res) {
 
     // TODO:
     // - mtid as mrname string comparison too?  Needs hdr (data as struct).
-    // - string regexp matching, for e.g. read names.
-    // - plus funcs.  Eg avg(qual) ?  Where to put that?
-    //   would need qual returned as string / array and "avg" as data
-    //   transform in the expression parser.  Then permits min, max, etc.
 
     res->is_str = 0;
-    if (strncasecmp(str, "flag", 4) == 0) {
+    if (memcmp(str, "flag", 4) == 0) {
         str = *end = str+4;
         if (*str != '.') {
             res->d = b->core.flag;
             return 0;
         } else {
             str++;
-            if (!strncasecmp(str, "paired", 6)) {
+            if (!memcmp(str, "paired", 6)) {
                 *end = str+6;
                 res->d = b->core.flag & BAM_FPAIRED ? 1 : 0;
                 return 0;
-            } else if (!strncasecmp(str, "proper_pair", 11)) {
+            } else if (!memcmp(str, "proper_pair", 11)) {
                 *end = str+11;
                 res->d = b->core.flag & BAM_FPROPER_PAIR ? 1 : 0;
                 return 0;
-            } else if (!strncasecmp(str, "unmap", 5)) {
+            } else if (!memcmp(str, "unmap", 5)) {
                 *end = str+5;
                 res->d = b->core.flag & BAM_FUNMAP ? 1 : 0;
                 return 0;
-            } else if (!strncasecmp(str, "munmap", 6)) {
+            } else if (!memcmp(str, "munmap", 6)) {
                 *end = str+6;
                 res->d = b->core.flag & BAM_FMUNMAP ? 1 : 0;
                 return 0;
-            } else if (!strncasecmp(str, "reverse", 7)) {
+            } else if (!memcmp(str, "reverse", 7)) {
                 *end = str+7;
                 res->d = b->core.flag & BAM_FREVERSE ? 1 : 0;
                 return 0;
-            } else if (!strncasecmp(str, "mreverse", 8)) {
+            } else if (!memcmp(str, "mreverse", 8)) {
                 *end = str+8;
                 res->d = b->core.flag & BAM_FMREVERSE ? 1 : 0;
                 return 0;
-            } else if (!strncasecmp(str, "read1", 5)) {
+            } else if (!memcmp(str, "read1", 5)) {
                 *end = str+5;
                 res->d = b->core.flag & BAM_FREAD1 ? 1 : 0;
                 return 0;
-            } else if (!strncasecmp(str, "read2", 6)) {
+            } else if (!memcmp(str, "read2", 6)) {
                 *end = str+5;
                 res->d = b->core.flag & BAM_FREAD2 ? 1 : 0;
                 return 0;
-            } else if (!strncasecmp(str, "secondary", 9)) {
+            } else if (!memcmp(str, "secondary", 9)) {
                 *end = str+9;
                 res->d = b->core.flag & BAM_FSECONDARY ? 1 : 0;
                 return 0;
-            } else if (!strncasecmp(str, "qcfail", 6)) {
+            } else if (!memcmp(str, "qcfail", 6)) {
                 *end = str+6;
                 res->d = b->core.flag & BAM_FQCFAIL ? 1 : 0;
                 return 0;
-            } else if (!strncasecmp(str, "dup", 3)) {
+            } else if (!memcmp(str, "dup", 3)) {
                 *end = str+3;
                 res->d = b->core.flag & BAM_FDUP ? 1 : 0;
                 return 0;
-            } else if (!strncasecmp(str, "supplementary", 13)) {
+            } else if (!memcmp(str, "supplementary", 13)) {
                 *end = str+13;
                 res->d = b->core.flag & BAM_FSUPPLEMENTARY ? 1 : 0;
                 return 0;
@@ -145,34 +141,34 @@ static int bam_sym_lookup(void *data, char *str, char **end, fexpr_t *res) {
                 return -1;
             }
         }
-    } else if (strncasecmp(str, "mqual", 5) == 0) {
+    } else if (memcmp(str, "mqual", 5) == 0) {
         *end = str+5;
         res->d = b->core.qual;
-    } else if (strncasecmp(str, "qlen", 4) == 0) {
+    } else if (memcmp(str, "qlen", 4) == 0) {
         *end = str+4;
         res->d = b->core.l_qseq;
-    } else if (strncasecmp(str, "rlen", 4) == 0) {
+    } else if (memcmp(str, "rlen", 4) == 0) {
         *end = str+4;
         res->d = bam_cigar2rlen(b->core.n_cigar, bam_get_cigar(b));
-    } else if (strncasecmp(str, "ncigar", 6) == 0) {
+    } else if (memcmp(str, "ncigar", 6) == 0) {
         *end = str+6;
         res->d = b->core.n_cigar;
-    } else if (strncasecmp(str, "mtid", 4) == 0) {
+    } else if (memcmp(str, "mtid", 4) == 0) {
         *end = str+4;
         res->d = b->core.mtid;
-    } else if (strncasecmp(str, "isize", 5) == 0) {
+    } else if (memcmp(str, "isize", 5) == 0) {
         *end = str+5;
         res->d = b->core.isize;
-    } else if (strncasecmp(str, "pos", 3) == 0) {
+    } else if (memcmp(str, "pos", 3) == 0) {
         *end = str+3;
         res->d = b->core.pos;
-    } else if (strncasecmp(str, "tid", 3) == 0) {
+    } else if (memcmp(str, "tid", 3) == 0) {
         *end = str+3;
         res->d = b->core.tid;
 
 //  Strings
 
-    } else if (strncasecmp(str, "name", 4) == 0) {
+    } else if (memcmp(str, "name", 4) == 0) {
         *end = str+4;
         res->is_str = 1;
         kputs(bam_get_qname(b), ks_clear(&res->s));

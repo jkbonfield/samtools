@@ -47,8 +47,6 @@ typedef struct {
 typedef struct sam_filter sam_filter_t;
 
 // Create a SAM filter for expression "str".
-// It is the callers responsibility to ensure this pointer is valid
-// memory until sam_filter_free is called.
 //
 // Returns a pointer on success,
 //         NULL on failure
