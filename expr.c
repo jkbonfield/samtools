@@ -25,8 +25,6 @@ DEALINGS IN THE SOFTWARE.  */
 // TODO:
 // - add maths functions.  pow, sqrt, log, min, max, ?
 // - ?: operator for conditionals?
-// - string literals (for variable comparison
-// - variable lookup: supply a callback func to return value?
 
 #include <config.h>
 
@@ -176,18 +174,32 @@ static int simple_expr(sam_filter_t *filt, void *data, sym_func *fn,
         res->d = d;
     } else {
         // Not valid floating point syntax.
-        // FIXME: add function call names in here; len(), sqrt(), pow(), etc
+        // TODO: add function call names in here; len(), sqrt(), pow(), etc
         if (*str == '"') {
-            // string.  FIXME: cope with backslashes at some point.
-            // Easiest with detection for \ here (rare event) and
-            // post ks_escape function to remove in-situ if needed.
             res->is_str = 1;
             char *e = str+1;
-            while (*e && *e != '"')
-                e++;
+            int backslash = 0;
+            while (*e && *e != '"') {
+                if (*e == '\\')
+                    backslash=1, e+=1+(e[1]!='\0');
+                else
+                    e++;
+            }
 
             kputsn(str+1, e-(str+1), ks_clear(&res->s));
-            *end = e + (*e == '"');
+            if (backslash) {
+                size_t i, j;
+                for (i = j = 0; i < res->s.l; i++) {
+                    if (res->s.s[i] == '\\')
+                        i++;
+                    res->s.s[j++] = res->s.s[i];
+                }
+                res->s.s[j] = 0;
+                res->s.l = j;
+            }
+            if (*e != '"')
+                return -1;
+            *end = e+1;
         } else if (fn)
             // Look up variable.
             return fn(data, str, end, res);
