@@ -50,7 +50,8 @@ typedef struct sam_filter {
 } sam_filter_t;
 
 /*
- * This is designed to be mostly C like with mostly same the precedence rules.
+ * This is designed to be mostly C like with mostly same the precedence rules,
+ * with the exception of bit operators (widely considered as a mistake in C).
  * It's not full C (eg no bit-shifting), but good enough for our purposes.
  *
  * Supported syntax, in order of precedence:
@@ -60,9 +61,9 @@ typedef struct sam_filter {
  * Unary ops:     +, -, !, ~  eg -10 +10, !10 (0), ~5 (bitwise not)
  * Math ops:      *, /, %  [TODO: add // for floor division?]
  * Math ops:      +, -
+ * Bit-wise:      &, |, ^  [NB as 3 precedence levels, in that order]
  * Conditionals:  >, >=, <, <=,
  * Equality:      ==, !=, =~ !~
- * Bit-wise:      &, |, ^  [NB as 3 precedence levels, in that order]
  * Boolean:       &&, ||
  */
 
@@ -319,16 +320,100 @@ static int add_expr(sam_filter_t *filt, void *data, sym_func *fn,
 }
 
 /*
- * cmp_expr
+ * bitand_expr
  *     : add_expr
- *     | cmp_expr '<=' add_expr
- *     | cmp_expr '<'  add_expr
- *     | cmp_expr '>=' add_expr
- *     | cmp_expr '>'  add_expr
+ *     | bitand_expr '&' add_expr
+ */
+static int bitand_expr(sam_filter_t *filt, void *data, sym_func *fn,
+                       char *str, char **end, fexpr_t *res) {
+    if (add_expr(filt, data, fn, str, end, res)) return -1;
+
+    fexpr_t val = FEXPR_INIT;
+    for (;;) {
+        str = ws(*end);
+        if (*str == '&' && str[1] != '&') {
+            if (add_expr(filt, data, fn, str+1, end, &val)) return -1;
+            if (res->is_str || val.is_str) {
+                fexpr_free(&val);
+                return -1;
+            }
+            res->is_true = res->d = (int64_t)res->d & (int64_t)val.d;
+        } else {
+            break;
+        }
+    }
+    fexpr_free(&val);
+
+    return 0;
+}
+
+/*
+ * bitxor_expr
+ *     : bitand_expr
+ *     | bitxor_expr '^' bitand_expr
+ */
+static int bitxor_expr(sam_filter_t *filt, void *data, sym_func *fn,
+                       char *str, char **end, fexpr_t *res) {
+    if (bitand_expr(filt, data, fn, str, end, res)) return -1;
+
+    fexpr_t val = FEXPR_INIT;
+    for (;;) {
+        str = ws(*end);
+        if (*str == '^') {
+            if (bitand_expr(filt, data, fn, str+1, end, &val)) return -1;
+            if (res->is_str || val.is_str) {
+                fexpr_free(&val);
+                return -1;
+            }
+            res->is_true = res->d = (int64_t)res->d ^ (int64_t)val.d;
+        } else {
+            break;
+        }
+    }
+    fexpr_free(&val);
+
+    return 0;
+}
+
+/*
+ * bitor_expr
+ *     : xor_expr
+ *     | bitor_expr '|' xor_expr
+ */
+static int bitor_expr(sam_filter_t *filt, void *data, sym_func *fn,
+                      char *str, char **end, fexpr_t *res) {
+    if (bitxor_expr(filt, data, fn, str, end, res)) return -1;
+
+    fexpr_t val = FEXPR_INIT;
+    for (;;) {
+        str = ws(*end);
+        if (*str == '|' && str[1] != '|') {
+            if (bitxor_expr(filt, data, fn, str+1, end, &val)) return -1;
+            if (res->is_str || val.is_str) {
+                fexpr_free(&val);
+                return -1;
+            }
+            res->is_true = res->d = (int64_t)res->d | (int64_t)val.d;
+        } else {
+            break;
+        }
+    }
+    fexpr_free(&val);
+
+    return 0;
+}
+
+/*
+ * cmp_expr
+ *     : bitor_expr
+ *     | cmp_expr '<=' bitor_expr
+ *     | cmp_expr '<'  bitor_expr
+ *     | cmp_expr '>=' bitor_expr
+ *     | cmp_expr '>'  bitor_expr
  */
 static int cmp_expr(sam_filter_t *filt, void *data, sym_func *fn,
                     char *str, char **end, fexpr_t *res) {
-    if (add_expr(filt, data, fn, str, end, res)) return -1;
+    if (bitor_expr(filt, data, fn, str, end, res)) return -1;
 
     str = ws(*end);
     fexpr_t val = FEXPR_INIT;
@@ -452,110 +537,26 @@ static int eq_expr(sam_filter_t *filt, void *data, sym_func *fn,
 }
 
 /*
- * bitand_expr
+ * and_expr
  *     : eq_expr
- *     | bitand_expr '&' eq_expr
+ *     | and_expr 'and' eq_expr
+ *     | and_expr 'or'  eq_expr
  */
-static int bitand_expr(sam_filter_t *filt, void *data, sym_func *fn,
-                       char *str, char **end, fexpr_t *res) {
+static int and_expr(sam_filter_t *filt, void *data, sym_func *fn,
+                    char *str, char **end, fexpr_t *res) {
     if (eq_expr(filt, data, fn, str, end, res)) return -1;
 
     fexpr_t val = FEXPR_INIT;
     for (;;) {
         str = ws(*end);
-        if (*str == '&' && str[1] != '&') {
-            if (eq_expr(filt, data, fn, str+1, end, &val)) return -1;
-            if (res->is_str || val.is_str) {
-                fexpr_free(&val);
-                return -1;
-            }
-            res->is_true = res->d = (int64_t)res->d & (int64_t)val.d;
-        } else {
-            break;
-        }
-    }
-    fexpr_free(&val);
-
-    return 0;
-}
-
-/*
- * bitxor_expr
- *     : bitand_expr
- *     | bitxor_expr '^' bitand_expr
- */
-static int bitxor_expr(sam_filter_t *filt, void *data, sym_func *fn,
-                       char *str, char **end, fexpr_t *res) {
-    if (bitand_expr(filt, data, fn, str, end, res)) return -1;
-
-    fexpr_t val = FEXPR_INIT;
-    for (;;) {
-        str = ws(*end);
-        if (*str == '^') {
-            if (bitand_expr(filt, data, fn, str+1, end, &val)) return -1;
-            if (res->is_str || val.is_str) {
-                fexpr_free(&val);
-                return -1;
-            }
-            res->is_true = res->d = (int64_t)res->d ^ (int64_t)val.d;
-        } else {
-            break;
-        }
-    }
-    fexpr_free(&val);
-
-    return 0;
-}
-
-/*
- * bitor_expr
- *     : xor_expr
- *     | bitor_expr '|' xor_expr
- */
-static int bitor_expr(sam_filter_t *filt, void *data, sym_func *fn,
-                      char *str, char **end, fexpr_t *res) {
-    if (bitxor_expr(filt, data, fn, str, end, res)) return -1;
-
-    fexpr_t val = FEXPR_INIT;
-    for (;;) {
-        str = ws(*end);
-        if (*str == '|' && str[1] != '|') {
-            if (bitxor_expr(filt, data, fn, str+1, end, &val)) return -1;
-            if (res->is_str || val.is_str) {
-                fexpr_free(&val);
-                return -1;
-            }
-            res->is_true = res->d = (int64_t)res->d | (int64_t)val.d;
-        } else {
-            break;
-        }
-    }
-    fexpr_free(&val);
-
-    return 0;
-}
-
-/*
- * and_expr
- *     : bitop_expr
- *     | and_expr 'and' bitop_expr
- *     | and_expr 'or'  bitop_expr
- */
-static int and_expr(sam_filter_t *filt, void *data, sym_func *fn,
-                    char *str, char **end, fexpr_t *res) {
-    if (bitor_expr(filt, data, fn, str, end, res)) return -1;
-
-    fexpr_t val = FEXPR_INIT;
-    for (;;) {
-        str = ws(*end);
         if (str[0] == '&' && str[1] == '&') {
-            if (bitor_expr(filt, data, fn, str+2, end, &val)) return -1;
+            if (eq_expr(filt, data, fn, str+2, end, &val)) return -1;
             res->is_true = res->d =
                 (res->is_true || (res->is_str && res->s.s) || res->d) &&
                 (val.is_true  || (val.is_str && val.s.s) || val.d);
             res->is_str = 0;
         } else if (str[0] == '|' && str[1] == '|') {
-            if (bitor_expr(filt, data, fn, str+2, end, &val)) return -1;
+            if (eq_expr(filt, data, fn, str+2, end, &val)) return -1;
             res->is_true = res->d =
                 res->is_true || (res->is_str && res->s.s) || res->d ||
                 val.is_true  || (val.is_str  && val.s.s ) || val.d;
