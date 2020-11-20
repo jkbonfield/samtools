@@ -40,6 +40,15 @@ DEALINGS IN THE SOFTWARE.  */
 
 #include "expr.h"
 
+// Could also cache fexpr_t stack here for kstring reuse?
+#define MAX_REGEX 10
+typedef struct sam_filter {
+    char *str;
+    int parsed;
+    int curr_regex, max_regex;
+    regex_t preg[MAX_REGEX];
+} sam_filter_t;
+
 /*
  * This is designed to be mostly C like with mostly same the precedence rules.
  * It's not full C (eg no bit-shifting), but good enough for our purposes.
@@ -64,7 +73,7 @@ static char *ws(char *str) {
     return str;
 }
 
-static int expression(void *data, sym_func *f,
+static int expression(sam_filter_t *filt, void *data, sym_func *fn,
                       char *str, char **end, fexpr_t *res);
 
 /*
@@ -74,12 +83,12 @@ static int expression(void *data, sym_func *f,
  * //  | string ?
  *     | '(' expression ')'
 */
-static int simple_expr(void *data, sym_func *f,
+static int simple_expr(sam_filter_t *filt, void *data, sym_func *fn,
                        char *str, char **end, fexpr_t *res) {
     // Main recursion step
     str = ws(str);
     if (*str == '(') {
-        if (expression(data, f, str+1, end, res)) return -1;
+        if (expression(filt, data, fn, str+1, end, res)) return -1;
         str = ws(*end);
         if (*str != ')') {
             fprintf(stderr, "Missing ')'\n");
@@ -102,6 +111,8 @@ static int simple_expr(void *data, sym_func *f,
         // FIXME: add function call names in here; len(), sqrt(), pow(), etc
         if (*str == '"') {
             // string.  FIXME: cope with backslashes at some point.
+	    // Easiest with detection for \ here (rare event) and
+	    // post ks_escape function to remove in-situ if needed.
             res->is_str = 1;
             char *e = str+1;
             while (*e && *e != '"')
@@ -109,9 +120,9 @@ static int simple_expr(void *data, sym_func *f,
 
             kputsn(str+1, e-(str+1), ks_clear(&res->s));
             *end = e + (*e == '"');
-        } else if (f)
-            // Look up variable
-            return f(data, str, end, res);
+        } else if (fn)
+            // Look up variable.
+            return fn(data, str, end, res);
         else
             return -1;
     }
@@ -127,21 +138,21 @@ static int simple_expr(void *data, sym_func *f,
  *     | '!' unary_expr // higher precedence
  *     | '~' unary_expr // higher precedence
  */
-static int unary_expr(void *data, sym_func *f,
+static int unary_expr(sam_filter_t *filt, void *data, sym_func *fn,
                       char *str, char **end, fexpr_t *res) {
     int err;
     str = ws(str);
     if (*str == '+') {
-        err = simple_expr(data, f, str+1, end, res);
+        err = simple_expr(filt, data, fn, str+1, end, res);
         err |= res->is_str;
         res->is_true = res->d != 0;
     } else if (*str == '-') {
-        err = simple_expr(data, f, str+1, end, res);
+        err = simple_expr(filt, data, fn, str+1, end, res);
         err |= res->is_str;
         res->d = -res->d;
         res->is_true = res->d != 0;
     } else if (*str == '!') {
-        err = unary_expr(data, f, str+1, end, res);
+        err = unary_expr(filt, data, fn, str+1, end, res);
         if (res->is_str) {
             res->is_str = 0;
             res->d = 0;
@@ -150,12 +161,12 @@ static int unary_expr(void *data, sym_func *f,
         }
         res->is_true = !res->is_true;
     } else if (*str == '~') {
-        err = unary_expr(data, f, str+1, end, res);
+        err = unary_expr(filt, data, fn, str+1, end, res);
         err |= res->is_str;
         res->d = ~(int64_t)res->d;
         res->is_true = !res->is_true;
     } else {
-        err = simple_expr(data, f, str, end, res);
+        err = simple_expr(filt, data, fn, str, end, res);
     }
     return err ? -1 : 0;
 }
@@ -169,9 +180,9 @@ static int unary_expr(void *data, sym_func *f,
  *         | unary_expr '%' unary_expr
  *       )*
  */
-static int mul_expr(void *data, sym_func *f,
+static int mul_expr(sam_filter_t *filt, void *data, sym_func *fn,
                     char *str, char **end, fexpr_t *res) {
-    if (unary_expr(data, f, str, end, res))
+    if (unary_expr(filt, data, fn, str, end, res))
         return -1;
 
     str = *end;
@@ -179,7 +190,7 @@ static int mul_expr(void *data, sym_func *f,
     while (*str) {
         str = ws(str);
         if (*str == '*' || *str == '/' || *str == '%') {
-            if (unary_expr(data, f, str+1, end, &val)) return -1;
+            if (unary_expr(filt, data, fn, str+1, end, &val)) return -1;
             if (val.is_str || res->is_str) {
                 fexpr_free(&val);
                 return -1; // arith on strings
@@ -209,9 +220,9 @@ static int mul_expr(void *data, sym_func *f,
  *         | mul_expr '-' mul_expr
  *       )*
  */
-static int add_expr(void *data, sym_func *f,
+static int add_expr(sam_filter_t *filt, void *data, sym_func *fn,
                     char *str, char **end, fexpr_t *res) {
-    if (mul_expr(data, f, str, end, res))
+    if (mul_expr(filt, data, fn, str, end, res))
         return -1;
 
     str = *end;
@@ -219,7 +230,7 @@ static int add_expr(void *data, sym_func *f,
     while (*str) {
         str = ws(str);
         if (*str == '+' || *str == '-') {
-            if (mul_expr(data, f, str+1, end, &val)) return -1;
+            if (mul_expr(filt, data, fn, str+1, end, &val)) return -1;
             if (val.is_str || res->is_str) {
                 fexpr_free(&val);
                 return -1; // arith on strings
@@ -248,35 +259,35 @@ static int add_expr(void *data, sym_func *f,
  *     | cmp_expr '>=' add_expr
  *     | cmp_expr '>'  add_expr
  */
-static int cmp_expr(void *data, sym_func *f,
+static int cmp_expr(sam_filter_t *filt, void *data, sym_func *fn,
                     char *str, char **end, fexpr_t *res) {
-    if (add_expr(data, f, str, end, res)) return -1;
+    if (add_expr(filt, data, fn, str, end, res)) return -1;
 
     str = ws(*end);
     fexpr_t val = FEXPR_INIT;
     int err = 0;
 
     if (strncmp(str, ">=", 2) == 0) {
-        err = cmp_expr(data, f, str+2, end, &val);
-        res->is_true = res->d = res->is_str && res->s.s && val.is_str && val.s.s
+        err = cmp_expr(filt, data, fn, str+2, end, &val);
+        res->is_true=res->d = res->is_str && res->s.s && val.is_str && val.s.s
             ? strcmp(res->s.s, val.s.s) >= 0
             : !res->is_str && !val.is_str && res->d >= val.d;
         res->is_str = 0;
     } else if (*str == '>') {
-        err = cmp_expr(data, f, str+1, end, &val);
-        res->is_true = res->d = res->is_str && res->s.s && val.is_str && val.s.s
+        err = cmp_expr(filt, data, fn, str+1, end, &val);
+        res->is_true=res->d = res->is_str && res->s.s && val.is_str && val.s.s
             ? strcmp(res->s.s, val.s.s) > 0
             : !res->is_str && !val.is_str && res->d > val.d;
         res->is_str = 0;
     } else if (strncmp(str, "<=", 2) == 0) {
-        err = cmp_expr(data, f, str+2, end, &val);
-        res->is_true = res->d = res->is_str && res->s.s && val.is_str && val.s.s
+        err = cmp_expr(filt, data, fn, str+2, end, &val);
+        res->is_true=res->d = res->is_str && res->s.s && val.is_str && val.s.s
             ? strcmp(res->s.s, val.s.s) <= 0
             : !res->is_str && !val.is_str && res->d <= val.d;
         res->is_str = 0;
     } else if (*str == '<') {
-        err = cmp_expr(data, f, str+1, end, &val);
-        res->is_true = res->d = res->is_str && res->s.s && val.is_str && val.s.s
+        err = cmp_expr(filt, data, fn, str+1, end, &val);
+        res->is_true=res->d = res->is_str && res->s.s && val.is_str && val.s.s
             ? strcmp(res->s.s, val.s.s) < 0
             : !res->is_str && !val.is_str && res->d < val.d;
         res->is_str = 0;
@@ -294,9 +305,9 @@ static int cmp_expr(void *data, sym_func *f,
  *     | eq_expr '=~' cmp_expr
  *     | eq_expr '!~' cmp_expr
  */
-static int eq_expr(void *data, sym_func *f,
+static int eq_expr(sam_filter_t *filt, void *data, sym_func *fn,
                    char *str, char **end, fexpr_t *res) {
-    if (cmp_expr(data, f, str, end, res)) return -1;
+    if (cmp_expr(filt, data, fn, str, end, res)) return -1;
 
     str = ws(*end);
 
@@ -307,7 +318,7 @@ static int eq_expr(void *data, sym_func *f,
     // string vs string comparison is as expected
     // numeric vs string is false
     if (strncmp(str, "==", 2) == 0) {
-        if ((err = eq_expr(data, f, str+2, end, &val))) {
+        if ((err = eq_expr(filt, data, fn, str+2, end, &val))) {
             res->is_true = res->d = 0;
         } else {
             res->is_true = res->d = res->is_str
@@ -317,7 +328,7 @@ static int eq_expr(void *data, sym_func *f,
         res->is_str = 0;
 
     } else if (strncmp(str, "!=", 2) == 0) {
-        if ((err = eq_expr(data, f, str+2, end, &val))) {
+        if ((err = eq_expr(filt, data, fn, str+2, end, &val))) {
             res->is_true = res->d = 0;
         } else {
             res->is_true = res->d = res->is_str
@@ -327,26 +338,40 @@ static int eq_expr(void *data, sym_func *f,
         res->is_str = 0;
 
     } else if (strncmp(str, "=~", 2) == 0 || strncmp(str, "!~", 2) == 0) {
-        err = eq_expr(data, f, str+2, end, &val);
+        err = eq_expr(filt, data, fn, str+2, end, &val);
         if (!val.is_str || !res->is_str) {
             fexpr_free(&val);
             return -1;
         }
         if (val.s.s && res->s.s && val.is_true >= 0 && res->is_true >= 0) {
-            // FIXME: cache compiled regexp
-            regex_t preg;
-            int ec;
-            if ((ec = regcomp(&preg, val.s.s, REG_EXTENDED | REG_NOSUB)) != 0) {
-                char errbuf[1024];
-                regerror(ec, &preg, errbuf, 1024);
-                fprintf(stderr, "Failed regex: %.1024s\n", errbuf);
-                fexpr_free(&val);
-                return -1;
-            }
-            res->is_true = res->d = regexec(&preg, res->s.s, 0, NULL, 0) == 0
+            regex_t preg_, *preg;
+	    if (filt->curr_regex >= filt->max_regex) {
+		// Compile regex if not seen before
+		if (filt->curr_regex >= MAX_REGEX) {
+		    preg = &preg_;
+		} else {
+		    preg = &filt->preg[filt->curr_regex];
+		    filt->max_regex++;
+		}
+
+		int ec = regcomp(preg, val.s.s, REG_EXTENDED | REG_NOSUB);
+		if (ec != 0) {
+		    char errbuf[1024];
+		    regerror(ec, preg, errbuf, 1024);
+		    fprintf(stderr, "Failed regex: %.1024s\n", errbuf);
+		    fexpr_free(&val);
+		    return -1;
+		}
+            } else {
+		preg = &filt->preg[filt->curr_regex];
+	    }
+            res->is_true = res->d = regexec(preg, res->s.s, 0, NULL, 0) == 0
                 ? *str == '='  // matcn
                 : *str == '!'; // no-match
-            regfree(&preg);
+	    if (preg == &preg_)
+		regfree(preg);
+
+	    filt->curr_regex++;
         } else {
             // nul regexp or input is considered false
             res->is_true = 0;
@@ -363,15 +388,15 @@ static int eq_expr(void *data, sym_func *f,
  *     : eq_expr
  *     | bitand_expr '&' eq_expr
  */
-static int bitand_expr(void *data, sym_func *f,
+static int bitand_expr(sam_filter_t *filt, void *data, sym_func *fn,
                        char *str, char **end, fexpr_t *res) {
-    if (eq_expr(data, f, str, end, res)) return -1;
+    if (eq_expr(filt, data, fn, str, end, res)) return -1;
 
     fexpr_t val = FEXPR_INIT;
     for (;;) {
         str = ws(*end);
         if (*str == '&' && str[1] != '&') {
-            if (eq_expr(data, f, str+1, end, &val)) return -1;
+            if (eq_expr(filt, data, fn, str+1, end, &val)) return -1;
             if (res->is_str || val.is_str) {
                 fexpr_free(&val);
                 return -1;
@@ -391,15 +416,15 @@ static int bitand_expr(void *data, sym_func *f,
  *     : bitand_expr
  *     | bitxor_expr '^' bitand_expr
  */
-static int bitxor_expr(void *data, sym_func *f,
+static int bitxor_expr(sam_filter_t *filt, void *data, sym_func *fn,
                        char *str, char **end, fexpr_t *res) {
-    if (bitand_expr(data, f, str, end, res)) return -1;
+    if (bitand_expr(filt, data, fn, str, end, res)) return -1;
 
     fexpr_t val = FEXPR_INIT;
     for (;;) {
         str = ws(*end);
         if (*str == '^') {
-            if (bitand_expr(data, f, str+1, end, &val)) return -1;
+            if (bitand_expr(filt, data, fn, str+1, end, &val)) return -1;
             if (res->is_str || val.is_str) {
                 fexpr_free(&val);
                 return -1;
@@ -419,15 +444,15 @@ static int bitxor_expr(void *data, sym_func *f,
  *     : xor_expr
  *     | bitor_expr '|' xor_expr
  */
-static int bitor_expr(void *data, sym_func *f,
+static int bitor_expr(sam_filter_t *filt, void *data, sym_func *fn,
                       char *str, char **end, fexpr_t *res) {
-    if (bitxor_expr(data, f, str, end, res)) return -1;
+    if (bitxor_expr(filt, data, fn, str, end, res)) return -1;
 
     fexpr_t val = FEXPR_INIT;
     for (;;) {
         str = ws(*end);
         if (*str == '|' && str[1] != '|') {
-            if (bitxor_expr(data, f, str+1, end, &val)) return -1;
+            if (bitxor_expr(filt, data, fn, str+1, end, &val)) return -1;
             if (res->is_str || val.is_str) {
                 fexpr_free(&val);
                 return -1;
@@ -448,21 +473,21 @@ static int bitor_expr(void *data, sym_func *f,
  *     | and_expr 'and' bitop_expr
  *     | and_expr 'or'  bitop_expr
  */
-static int and_expr(void *data, sym_func *f,
+static int and_expr(sam_filter_t *filt, void *data, sym_func *fn,
                     char *str, char **end, fexpr_t *res) {
-    if (bitor_expr(data, f, str, end, res)) return -1;
+    if (bitor_expr(filt, data, fn, str, end, res)) return -1;
 
     fexpr_t val = FEXPR_INIT;
     for (;;) {
         str = ws(*end);
         if (strncmp(str, "&&", 2) == 0) {
-            if (bitor_expr(data, f, str+2, end, &val)) return -1;
+            if (bitor_expr(filt, data, fn, str+2, end, &val)) return -1;
             res->is_true = res->d =
                 (res->is_true || (res->is_str && res->s.s) || res->d) &&
                 (val.is_true  || (val.is_str && val.s.s) || val.d);
             res->is_str = 0;
         } else if (strncmp(str, "||", 2) == 0) {
-            if (bitor_expr(data, f, str+2, end, &val)) return -1;
+            if (bitor_expr(filt, data, fn, str+2, end, &val)) return -1;
             res->is_true = res->d =
                 res->is_true || (res->is_str && res->s.s) || res->d ||
                 val.is_true  || (val.is_str  && val.s.s ) || val.d;
@@ -476,21 +501,42 @@ static int and_expr(void *data, sym_func *f,
     return 0;
 }
 
-static int expression(void *data, sym_func *f,
+static int expression(sam_filter_t *filt, void *data, sym_func *fn,
                       char *str, char **end, fexpr_t *res) {
-    return and_expr(data, f, str, end, res);
+    return and_expr(filt, data, fn, str, end, res);
 }
 
-int evaluate_filter(void *data, sym_func *f, char *str, fexpr_t *res) {
+sam_filter_t *sam_filter_init(char *str) {
+    sam_filter_t *f = calloc(1, sizeof(*f));
+    if (!f) return NULL;
+
+    f->str = str;
+    return f;
+}
+
+void sam_filter_free(sam_filter_t *filt) {
+    if (!filt)
+	return;
+
+    int i;
+    for (i = 0; i < filt->max_regex; i++)
+	regfree(&filt->preg[i]);
+
+    free(filt);
+}
+
+int sam_filter_eval(sam_filter_t *filt, void *data, sym_func *fn,
+		    fexpr_t *res) {
     char *end = NULL;
 
     memset(res, 0, sizeof(*res));
 
-    if (expression(data, f, str, &end, res))
+    filt->curr_regex = 0;
+    if (expression(filt, data, fn, filt->str, &end, res))
         return -1;
 
     if (end && *ws(end)) {
-        fprintf(stderr, "Unable to parse expression at %s\n", str);
+        fprintf(stderr, "Unable to parse expression at %s\n", filt->str);
         return -1;
     }
 

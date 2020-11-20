@@ -44,8 +44,21 @@ typedef struct {
 
 #define FEXPR_INIT {0, 0, KS_INITIALIZE, 0}
 
+typedef struct sam_filter sam_filter_t;
+
+// Create a SAM filter for expression "str".
+// It is the callers responsibility to ensure this pointer is valid
+// memory until sam_filter_free is called.
+//
+// Returns a pointer on success,
+//         NULL on failure
+sam_filter_t *sam_filter_init(char *str);
+
+// Frees a sam_filter_t created via sam_filter_init
+void sam_filter_free(sam_filter_t *filt);
+
 typedef int (sym_func)(void *data, char *str, char **end, fexpr_t *res);
-int evaluate_filter(void *data, sym_func *f, char *str, fexpr_t *res);
+int sam_filter_eval(sam_filter_t *filt, void *data, sym_func *f, fexpr_t *res);
 
 static inline void fexpr_free(fexpr_t *f) {
     ks_free(&f->s);

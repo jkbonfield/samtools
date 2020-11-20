@@ -66,6 +66,7 @@ typedef struct samview_settings {
     int multi_region;
     char* tag;
     char *match_expr;
+    sam_filter_t *filter;
 } samview_settings_t;
 
 
@@ -291,7 +292,12 @@ static int process_aln(const sam_hdr_t *h, bam1_t *b, samview_settings_t* settin
 
     if (settings->match_expr) {
         fexpr_t res;
-        if (evaluate_filter(b, bam_sym_lookup, settings->match_expr, &res)) {
+        if (!settings->filter)
+            settings->filter = sam_filter_init(settings->match_expr);
+        sam_filter_t *filt = settings->filter;
+        if (!filt)
+            return -1;
+        if (sam_filter_eval(filt, b, bam_sym_lookup, &res)) {
             print_error("view", "Couldn't parse expression: \"%s\"",
                         settings->match_expr);
             fexpr_free(&res);
@@ -971,6 +977,8 @@ view_end:
     if (settings.tag) {
         free(settings.tag);
     }
+    if (settings.filter)
+        sam_filter_free(settings.filter);
 
     if (p.pool)
         hts_tpool_destroy(p.pool);

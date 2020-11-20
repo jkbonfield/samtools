@@ -61,6 +61,7 @@ int lookup(void *data, char *str, char **end, fexpr_t *res) {
         *end = str+4;
         res->is_str = 1;
         ks_clear(&res->s);
+
     } else {
         return -1;
     }
@@ -183,7 +184,10 @@ int test(void) {
     int i;
     fexpr_t r;
     for (i = 0; i < sizeof(tests) / sizeof(*tests); i++) {
-        if (evaluate_filter(NULL, lookup, tests[i].str, &r)) {
+        sam_filter_t *filt = sam_filter_init(tests[i].str);
+        if (!filt)
+            return 1;
+        if (sam_filter_eval(filt, NULL, lookup, &r)) {
             fprintf(stderr, "Failed to parse filter string %s\n",
                     tests[i].str);
             return 1;
@@ -201,6 +205,7 @@ int test(void) {
         }
 
         fexpr_free(&r);
+        sam_filter_free(filt);
     }
 
     return 0;
@@ -209,15 +214,18 @@ int test(void) {
 int main(int argc, char **argv) {
     if (argc > 1) {
         fexpr_t v;
-        int err = evaluate_filter(NULL, lookup, argv[1], &v);
+        sam_filter_t *filt = sam_filter_init(argv[1]);
+        if (sam_filter_eval(filt, NULL, lookup, &v))
+            return 1;
+
         if (v.is_str)
-            printf("expr = \"%s\" (d=%f)\n", v.s.s, v.d);
+            puts(v.s.s);
         else
-            printf("expr = %f\n", v.d);
-        printf("err = %d\n", err);
+            printf("%g\n", v.d);
 
         fexpr_free(&v);
-        return v.d ? 0 : 1;
+        sam_filter_free(filt);
+        return 0;
     }
 
     return test();
