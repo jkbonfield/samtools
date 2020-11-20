@@ -76,6 +76,74 @@ static char *ws(char *str) {
 static int expression(sam_filter_t *filt, void *data, sym_func *fn,
                       char *str, char **end, fexpr_t *res);
 
+// Copied from htslib's textutils_internal.h.  Delete after migration
+static inline double hts_str2dbl(const char *in, char **end, int *failed) {
+    uint64_t n = 0;
+    int max_len = 15;
+    const unsigned char *v = (const unsigned char *) in;
+    const unsigned int ascii_zero = '0'; // Prevents conversion to signed
+    int neg = 0, point = -1;
+    double d;
+    static double D[] = {1,1, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7,
+                         1e8, 1e9, 1e10,1e11,1e12,1e13,1e14,1e15,
+                         1e16,1e17,1e18,1e19,1e20};
+
+    while (isspace(*v))
+        v++;
+
+    if (*v == '-') {
+        neg = 1;
+        v++;
+    } else if (*v == '+') {
+        v++;
+    }
+
+    switch(*v) {
+    case '1': case '2': case '3': case '4':
+    case '5': case '6': case '7': case '8': case '9':
+        break;
+
+    case '0':
+        if (v[1] != 'x' && v[1] != 'X') break;
+        // else fall through - hex number
+
+    default:
+        // Non numbers, like NaN, Inf
+        d = strtod(in, end);
+        if (*end == in)
+            *failed = 1;
+        return d;
+    }
+
+    while (*v == '0') ++v;
+
+    const unsigned char *start = v;
+
+    while (--max_len && *v>='0' && *v<='9')
+        n = n*10 + *v++ - ascii_zero;
+    if (max_len && *v == '.') {
+        point = v - start;
+        v++;
+        while (--max_len && *v>='0' && *v<='9')
+            n = n*10 + *v++ - ascii_zero;
+    }
+    if (point < 0)
+        point = v - start;
+
+    // Outside the scope of this quick and dirty parser.
+    if (!max_len || *v == 'e' || *v == 'E') {
+        d = strtod(in, end);
+        if (*end == in)
+            *failed = 1;
+        return d;
+    }
+
+    *end = (char *)v;
+    d = n / D[v - start - point];
+
+    return neg ? -d : d;
+}
+
 /*
  * simple_expr
  *     : identifier
@@ -100,9 +168,8 @@ static int simple_expr(sam_filter_t *filt, void *data, sym_func *fn,
     }
 
     // Otherwise a basic element.
-    // Ideally use hts_str2dbl, but it's internal only.
-    // FIXME: update this if/when we migrate this from samtools to htslib.
-    double d = strtod(str, end);
+    int fail = 0;
+    double d = hts_str2dbl(str, end, &fail);
     if (str != *end) {
         res->is_str = 0;
         res->d = d;
@@ -111,8 +178,8 @@ static int simple_expr(sam_filter_t *filt, void *data, sym_func *fn,
         // FIXME: add function call names in here; len(), sqrt(), pow(), etc
         if (*str == '"') {
             // string.  FIXME: cope with backslashes at some point.
-	    // Easiest with detection for \ here (rare event) and
-	    // post ks_escape function to remove in-situ if needed.
+            // Easiest with detection for \ here (rare event) and
+            // post ks_escape function to remove in-situ if needed.
             res->is_str = 1;
             char *e = str+1;
             while (*e && *e != '"')
@@ -338,7 +405,7 @@ static int eq_expr(sam_filter_t *filt, void *data, sym_func *fn,
         res->is_str = 0;
 
     } else if ((str[0] == '=' && str[1] == '~') ||
-	       (str[0] == '!' && str[1] == '~')) {
+               (str[0] == '!' && str[1] == '~')) {
         err = eq_expr(filt, data, fn, str+2, end, &val);
         if (!val.is_str || !res->is_str) {
             fexpr_free(&val);
@@ -346,33 +413,33 @@ static int eq_expr(sam_filter_t *filt, void *data, sym_func *fn,
         }
         if (val.s.s && res->s.s && val.is_true >= 0 && res->is_true >= 0) {
             regex_t preg_, *preg;
-	    if (filt->curr_regex >= filt->max_regex) {
-		// Compile regex if not seen before
-		if (filt->curr_regex >= MAX_REGEX) {
-		    preg = &preg_;
-		} else {
-		    preg = &filt->preg[filt->curr_regex];
-		    filt->max_regex++;
-		}
+            if (filt->curr_regex >= filt->max_regex) {
+                // Compile regex if not seen before
+                if (filt->curr_regex >= MAX_REGEX) {
+                    preg = &preg_;
+                } else {
+                    preg = &filt->preg[filt->curr_regex];
+                    filt->max_regex++;
+                }
 
-		int ec = regcomp(preg, val.s.s, REG_EXTENDED | REG_NOSUB);
-		if (ec != 0) {
-		    char errbuf[1024];
-		    regerror(ec, preg, errbuf, 1024);
-		    fprintf(stderr, "Failed regex: %.1024s\n", errbuf);
-		    fexpr_free(&val);
-		    return -1;
-		}
+                int ec = regcomp(preg, val.s.s, REG_EXTENDED | REG_NOSUB);
+                if (ec != 0) {
+                    char errbuf[1024];
+                    regerror(ec, preg, errbuf, 1024);
+                    fprintf(stderr, "Failed regex: %.1024s\n", errbuf);
+                    fexpr_free(&val);
+                    return -1;
+                }
             } else {
-		preg = &filt->preg[filt->curr_regex];
-	    }
+                preg = &filt->preg[filt->curr_regex];
+            }
             res->is_true = res->d = regexec(preg, res->s.s, 0, NULL, 0) == 0
                 ? *str == '='  // matcn
                 : *str == '!'; // no-match
-	    if (preg == &preg_)
-		regfree(preg);
+            if (preg == &preg_)
+                regfree(preg);
 
-	    filt->curr_regex++;
+            filt->curr_regex++;
         } else {
             // nul regexp or input is considered false
             res->is_true = 0;
@@ -481,13 +548,13 @@ static int and_expr(sam_filter_t *filt, void *data, sym_func *fn,
     fexpr_t val = FEXPR_INIT;
     for (;;) {
         str = ws(*end);
-	if (str[0] == '&' && str[1] == '&') {
+        if (str[0] == '&' && str[1] == '&') {
             if (bitor_expr(filt, data, fn, str+2, end, &val)) return -1;
             res->is_true = res->d =
                 (res->is_true || (res->is_str && res->s.s) || res->d) &&
                 (val.is_true  || (val.is_str && val.s.s) || val.d);
             res->is_str = 0;
-	} else if (str[0] == '|' && str[1] == '|') {
+        } else if (str[0] == '|' && str[1] == '|') {
             if (bitor_expr(filt, data, fn, str+2, end, &val)) return -1;
             res->is_true = res->d =
                 res->is_true || (res->is_str && res->s.s) || res->d ||
@@ -523,18 +590,18 @@ sam_filter_t *sam_filter_init(char *str) {
 
 void sam_filter_free(sam_filter_t *filt) {
     if (!filt)
-	return;
+        return;
 
     int i;
     for (i = 0; i < filt->max_regex; i++)
-	regfree(&filt->preg[i]);
+        regfree(&filt->preg[i]);
 
     free(filt->str);
     free(filt);
 }
 
 int sam_filter_eval(sam_filter_t *filt, void *data, sym_func *fn,
-		    fexpr_t *res) {
+                    fexpr_t *res) {
     char *end = NULL;
 
     memset(res, 0, sizeof(*res));

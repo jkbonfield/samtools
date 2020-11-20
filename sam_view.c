@@ -74,6 +74,11 @@ typedef struct samview_settings {
 extern const char *bam_get_library(sam_hdr_t *header, const bam1_t *b);
 extern int bam_remove_B(bam1_t *b);
 
+// Looks up variable names in str and replaces them with their value.
+// Also supports aux tags.
+//
+// Note the expression parser deliberately overallocates str size so it
+// is safe to use memcmp over strcmp.
 static int bam_sym_lookup(void *data, char *str, char **end, fexpr_t *res) {
     bam1_t *b = (bam1_t *)data;
 
@@ -81,149 +86,191 @@ static int bam_sym_lookup(void *data, char *str, char **end, fexpr_t *res) {
     // - mtid as mrname string comparison too?  Needs hdr (data as struct).
 
     res->is_str = 0;
-    if (memcmp(str, "flag", 4) == 0) {
-        str = *end = str+4;
-        if (*str != '.') {
-            res->d = b->core.flag;
-            return 0;
-        } else {
-            str++;
-            if (!memcmp(str, "paired", 6)) {
-                *end = str+6;
-                res->d = b->core.flag & BAM_FPAIRED ? 1 : 0;
-                return 0;
-            } else if (!memcmp(str, "proper_pair", 11)) {
-                *end = str+11;
-                res->d = b->core.flag & BAM_FPROPER_PAIR ? 1 : 0;
-                return 0;
-            } else if (!memcmp(str, "unmap", 5)) {
-                *end = str+5;
-                res->d = b->core.flag & BAM_FUNMAP ? 1 : 0;
-                return 0;
-            } else if (!memcmp(str, "munmap", 6)) {
-                *end = str+6;
-                res->d = b->core.flag & BAM_FMUNMAP ? 1 : 0;
-                return 0;
-            } else if (!memcmp(str, "reverse", 7)) {
-                *end = str+7;
-                res->d = b->core.flag & BAM_FREVERSE ? 1 : 0;
-                return 0;
-            } else if (!memcmp(str, "mreverse", 8)) {
-                *end = str+8;
-                res->d = b->core.flag & BAM_FMREVERSE ? 1 : 0;
-                return 0;
-            } else if (!memcmp(str, "read1", 5)) {
-                *end = str+5;
-                res->d = b->core.flag & BAM_FREAD1 ? 1 : 0;
-                return 0;
-            } else if (!memcmp(str, "read2", 6)) {
-                *end = str+5;
-                res->d = b->core.flag & BAM_FREAD2 ? 1 : 0;
-                return 0;
-            } else if (!memcmp(str, "secondary", 9)) {
-                *end = str+9;
-                res->d = b->core.flag & BAM_FSECONDARY ? 1 : 0;
-                return 0;
-            } else if (!memcmp(str, "qcfail", 6)) {
-                *end = str+6;
-                res->d = b->core.flag & BAM_FQCFAIL ? 1 : 0;
-                return 0;
-            } else if (!memcmp(str, "dup", 3)) {
-                *end = str+3;
-                res->d = b->core.flag & BAM_FDUP ? 1 : 0;
-                return 0;
-            } else if (!memcmp(str, "supplementary", 13)) {
-                *end = str+13;
-                res->d = b->core.flag & BAM_FSUPPLEMENTARY ? 1 : 0;
+    switch(*str) {
+    case 'f':
+        if (memcmp(str, "flag", 4) == 0) {
+            str = *end = str+4;
+            if (*str != '.') {
+                res->d = b->core.flag;
                 return 0;
             } else {
-                fprintf(stderr, "Unrecognised flag string\n");
-                return -1;
+                str++;
+                if (!memcmp(str, "paired", 6)) {
+                    *end = str+6;
+                    res->d = b->core.flag & BAM_FPAIRED ? 1 : 0;
+                    return 0;
+                } else if (!memcmp(str, "proper_pair", 11)) {
+                    *end = str+11;
+                    res->d = b->core.flag & BAM_FPROPER_PAIR ? 1 : 0;
+                    return 0;
+                } else if (!memcmp(str, "unmap", 5)) {
+                    *end = str+5;
+                    res->d = b->core.flag & BAM_FUNMAP ? 1 : 0;
+                    return 0;
+                } else if (!memcmp(str, "munmap", 6)) {
+                    *end = str+6;
+                    res->d = b->core.flag & BAM_FMUNMAP ? 1 : 0;
+                    return 0;
+                } else if (!memcmp(str, "reverse", 7)) {
+                    *end = str+7;
+                    res->d = b->core.flag & BAM_FREVERSE ? 1 : 0;
+                    return 0;
+                } else if (!memcmp(str, "mreverse", 8)) {
+                    *end = str+8;
+                    res->d = b->core.flag & BAM_FMREVERSE ? 1 : 0;
+                    return 0;
+                } else if (!memcmp(str, "read1", 5)) {
+                    *end = str+5;
+                    res->d = b->core.flag & BAM_FREAD1 ? 1 : 0;
+                    return 0;
+                } else if (!memcmp(str, "read2", 6)) {
+                    *end = str+5;
+                    res->d = b->core.flag & BAM_FREAD2 ? 1 : 0;
+                    return 0;
+                } else if (!memcmp(str, "secondary", 9)) {
+                    *end = str+9;
+                    res->d = b->core.flag & BAM_FSECONDARY ? 1 : 0;
+                    return 0;
+                } else if (!memcmp(str, "qcfail", 6)) {
+                    *end = str+6;
+                    res->d = b->core.flag & BAM_FQCFAIL ? 1 : 0;
+                    return 0;
+                } else if (!memcmp(str, "dup", 3)) {
+                    *end = str+3;
+                    res->d = b->core.flag & BAM_FDUP ? 1 : 0;
+                    return 0;
+                } else if (!memcmp(str, "supplementary", 13)) {
+                    *end = str+13;
+                    res->d = b->core.flag & BAM_FSUPPLEMENTARY ? 1 : 0;
+                    return 0;
+                } else {
+                    fprintf(stderr, "Unrecognised flag string\n");
+                    return -1;
+                }
             }
         }
-    } else if (memcmp(str, "mqual", 5) == 0) {
-        *end = str+5;
-        res->d = b->core.qual;
-    } else if (memcmp(str, "qlen", 4) == 0) {
-        *end = str+4;
-        res->d = b->core.l_qseq;
-    } else if (memcmp(str, "rlen", 4) == 0) {
-        *end = str+4;
-        res->d = bam_cigar2rlen(b->core.n_cigar, bam_get_cigar(b));
-    } else if (memcmp(str, "ncigar", 6) == 0) {
-        *end = str+6;
-        res->d = b->core.n_cigar;
-    } else if (memcmp(str, "mtid", 4) == 0) {
-        *end = str+4;
-        res->d = b->core.mtid;
-    } else if (memcmp(str, "isize", 5) == 0) {
-        *end = str+5;
-        res->d = b->core.isize;
-    } else if (memcmp(str, "pos", 3) == 0) {
-        *end = str+3;
-        res->d = b->core.pos;
-    } else if (memcmp(str, "tid", 3) == 0) {
-        *end = str+3;
-        res->d = b->core.tid;
+        break;
 
-//  Strings
+    case 'i':
+        if (memcmp(str, "isize", 5) == 0) {
+            *end = str+5;
+            res->d = b->core.isize;
+            return 0;
+        }
+        break;
 
-    } else if (memcmp(str, "name", 4) == 0) {
-        *end = str+4;
-        res->is_str = 1;
-        kputs(bam_get_qname(b), ks_clear(&res->s));
+    case 'm':
+        if (memcmp(str, "mqual", 5) == 0) {
+            *end = str+5;
+            res->d = b->core.qual;
+            return 0;
+        } else if (memcmp(str, "mtid", 4) == 0) {
+            *end = str+4;
+            res->d = b->core.mtid;
+            return 0;
+        }
+        break;
 
-    } else if (*str == '[' && str[1] && str[2] && str[3] == ']') {
-        /* aux tags */
-        *end = str+4;
-
-        uint8_t *aux = bam_aux_get(b, str+1);
-        if (aux) {
-            // we define the truth of a tag to be its presence, even if 0.
-            res->is_true = 1;
-            switch (*aux) {
-            case 'Z':
-            case 'H':
-                res->is_str = 1;
-                kputs((char *)aux+1, ks_clear(&res->s));
-                break;
-
-            case 'A':
-                res->is_str = 1;
-                kputsn((char *)aux+1, 1, ks_clear(&res->s));
-                break;
-
-            case 'i': case 'I':
-            case 's': case 'S':
-            case 'c': case 'C':
-                res->is_str = 0;
-                res->d = bam_aux2i(aux);
-                break;
-
-            case 'f':
-            case 'd':
-                res->is_str = 0;
-                res->d = bam_aux2f(aux);
-                break;
-
-            default:
-                // unsupported
-                return -1;
-            }
-
-        } else {
-            // hence absent tags are always false (and strings)
+    case 'n':
+        if (memcmp(str, "ncigar", 6) == 0) {
+            *end = str+6;
+            res->d = b->core.n_cigar;
+            return 0;
+        } else if (memcmp(str, "name", 4) == 0) {
+            *end = str+4;
             res->is_str = 1;
-            res->s.l = 0;
-            res->d = 0;
-            res->is_true = 0;
+            kputs(bam_get_qname(b), ks_clear(&res->s));
+            return 0;
         }
+        break;
 
-    } else {
-        return -1;
+    case 'p':
+        if (memcmp(str, "pos", 3) == 0) {
+            *end = str+3;
+            res->d = b->core.pos;
+            return 0;
+        }
+        break;
+
+    case 'q':
+        if (memcmp(str, "qlen", 4) == 0) {
+            *end = str+4;
+            res->d = b->core.l_qseq;
+            return 0;
+        }
+        break;
+
+    case 'r':
+        if (memcmp(str, "rlen", 4) == 0) {
+            *end = str+4;
+            res->d = bam_cigar2rlen(b->core.n_cigar, bam_get_cigar(b));
+            return 0;
+        }
+        break;
+
+    case 't':
+        if (memcmp(str, "tid", 3) == 0) {
+            *end = str+3;
+            res->d = b->core.tid;
+            return 0;
+        }
+        break;
+
+    case '[':
+        if (*str == '[' && str[1] && str[2] && str[3] == ']') {
+            /* aux tags */
+            *end = str+4;
+
+            uint8_t *aux = bam_aux_get(b, str+1);
+            if (aux) {
+                // we define the truth of a tag to be its presence, even if 0.
+                res->is_true = 1;
+                switch (*aux) {
+                case 'Z':
+                case 'H':
+                    res->is_str = 1;
+                    kputs((char *)aux+1, ks_clear(&res->s));
+                    break;
+
+                case 'A':
+                    res->is_str = 1;
+                    kputsn((char *)aux+1, 1, ks_clear(&res->s));
+                    break;
+
+                case 'i': case 'I':
+                case 's': case 'S':
+                case 'c': case 'C':
+                    res->is_str = 0;
+                    res->d = bam_aux2i(aux);
+                    break;
+
+                case 'f':
+                case 'd':
+                    res->is_str = 0;
+                    res->d = bam_aux2f(aux);
+                    break;
+
+                default:
+                    // unsupported
+                    return -1;
+                }
+                return 0;
+
+            } else {
+                // hence absent tags are always false (and strings)
+                res->is_str = 1;
+                res->s.l = 0;
+                res->d = 0;
+                res->is_true = 0;
+                return 0;
+            }
+        }
+        break;
     }
 
-    return 0;
+    // All successful matches in switch should return 0.
+    // So if we didn't match, it's a parse error.
+    return -1;
 }
 
 // Returns 0 to indicate read should be output 1 otherwise
