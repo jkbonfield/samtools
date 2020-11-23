@@ -78,7 +78,7 @@ extern int bam_remove_B(bam1_t *b);
 typedef struct {
     const sam_hdr_t *h;
     const bam1_t *b;
-} hdr_bam_t;
+} hb_pair;
 
 // Looks up variable names in str and replaces them with their value.
 // Also supports aux tags.
@@ -86,11 +86,27 @@ typedef struct {
 // Note the expression parser deliberately overallocates str size so it
 // is safe to use memcmp over strcmp.
 static int bam_sym_lookup(void *data, char *str, char **end, fexpr_t *res) {
-    hdr_bam_t *hb = (hdr_bam_t *)data;
+    hb_pair *hb = (hb_pair *)data;
     const bam1_t *b = hb->b;
 
     res->is_str = 0;
     switch(*str) {
+    case 'c':
+        if (memcmp(str, "cigar", 5) == 0) {
+            *end = str+5;
+            res->is_str = 1;
+            ks_clear(&res->s);
+            uint32_t *cigar = bam_get_cigar(b);
+            int i, n = b->core.n_cigar, r = 0;
+            for (i = 0; i < n; i++) {
+                r |= kputw (bam_cigar_oplen(cigar[i]), &res->s);
+                r |= kputc_(bam_cigar_opchr(cigar[i]), &res->s);
+            }
+            kputs("", &res->s);
+            return r ? 0 : -1;
+        }
+        break;
+
     case 'f':
         if (memcmp(str, "flag", 4) == 0) {
             str = *end = str+4;
@@ -101,51 +117,51 @@ static int bam_sym_lookup(void *data, char *str, char **end, fexpr_t *res) {
                 str++;
                 if (!memcmp(str, "paired", 6)) {
                     *end = str+6;
-                    res->d = b->core.flag & BAM_FPAIRED ? 1 : 0;
+                    res->d = b->core.flag & BAM_FPAIRED;
                     return 0;
                 } else if (!memcmp(str, "proper_pair", 11)) {
                     *end = str+11;
-                    res->d = b->core.flag & BAM_FPROPER_PAIR ? 1 : 0;
+                    res->d = b->core.flag & BAM_FPROPER_PAIR;
                     return 0;
                 } else if (!memcmp(str, "unmap", 5)) {
                     *end = str+5;
-                    res->d = b->core.flag & BAM_FUNMAP ? 1 : 0;
+                    res->d = b->core.flag & BAM_FUNMAP;
                     return 0;
                 } else if (!memcmp(str, "munmap", 6)) {
                     *end = str+6;
-                    res->d = b->core.flag & BAM_FMUNMAP ? 1 : 0;
+                    res->d = b->core.flag & BAM_FMUNMAP;
                     return 0;
                 } else if (!memcmp(str, "reverse", 7)) {
                     *end = str+7;
-                    res->d = b->core.flag & BAM_FREVERSE ? 1 : 0;
+                    res->d = b->core.flag & BAM_FREVERSE;
                     return 0;
                 } else if (!memcmp(str, "mreverse", 8)) {
                     *end = str+8;
-                    res->d = b->core.flag & BAM_FMREVERSE ? 1 : 0;
+                    res->d = b->core.flag & BAM_FMREVERSE;
                     return 0;
                 } else if (!memcmp(str, "read1", 5)) {
                     *end = str+5;
-                    res->d = b->core.flag & BAM_FREAD1 ? 1 : 0;
+                    res->d = b->core.flag & BAM_FREAD1;
                     return 0;
                 } else if (!memcmp(str, "read2", 6)) {
                     *end = str+5;
-                    res->d = b->core.flag & BAM_FREAD2 ? 1 : 0;
+                    res->d = b->core.flag & BAM_FREAD2;
                     return 0;
                 } else if (!memcmp(str, "secondary", 9)) {
                     *end = str+9;
-                    res->d = b->core.flag & BAM_FSECONDARY ? 1 : 0;
+                    res->d = b->core.flag & BAM_FSECONDARY;
                     return 0;
                 } else if (!memcmp(str, "qcfail", 6)) {
                     *end = str+6;
-                    res->d = b->core.flag & BAM_FQCFAIL ? 1 : 0;
+                    res->d = b->core.flag & BAM_FQCFAIL;
                     return 0;
                 } else if (!memcmp(str, "dup", 3)) {
                     *end = str+3;
-                    res->d = b->core.flag & BAM_FDUP ? 1 : 0;
+                    res->d = b->core.flag & BAM_FDUP;
                     return 0;
                 } else if (!memcmp(str, "supplementary", 13)) {
                     *end = str+13;
-                    res->d = b->core.flag & BAM_FSUPPLEMENTARY ? 1 : 0;
+                    res->d = b->core.flag & BAM_FSUPPLEMENTARY;
                     return 0;
                 } else {
                     fprintf(stderr, "Unrecognised flag string\n");
@@ -172,6 +188,10 @@ static int bam_sym_lookup(void *data, char *str, char **end, fexpr_t *res) {
             *end = str+4;
             res->d = b->core.mtid;
             return 0;
+        } else if (memcmp(str, "mpos", 4) == 0) {
+            *end = str+4;
+            res->d = b->core.mpos+1;
+            return 0;
         } else if (memcmp(str, "mrname", 6) == 0) {
             *end = str+6;
             res->is_str = 1;
@@ -186,18 +206,13 @@ static int bam_sym_lookup(void *data, char *str, char **end, fexpr_t *res) {
             *end = str+6;
             res->d = b->core.n_cigar;
             return 0;
-        } else if (memcmp(str, "name", 4) == 0) {
-            *end = str+4;
-            res->is_str = 1;
-            kputs(bam_get_qname(b), ks_clear(&res->s));
-            return 0;
         }
         break;
 
     case 'p':
         if (memcmp(str, "pos", 3) == 0) {
             *end = str+3;
-            res->d = b->core.pos;
+            res->d = b->core.pos+1;
             return 0;
         }
         break;
@@ -206,6 +221,11 @@ static int bam_sym_lookup(void *data, char *str, char **end, fexpr_t *res) {
         if (memcmp(str, "qlen", 4) == 0) {
             *end = str+4;
             res->d = b->core.l_qseq;
+            return 0;
+        } else if (memcmp(str, "qname", 5) == 0) {
+            *end = str+5;
+            res->is_str = 1;
+            kputs(bam_get_qname(b), ks_clear(&res->s));
             return 0;
         }
         break;
@@ -356,8 +376,8 @@ static int process_aln(const sam_hdr_t *h, bam1_t *b, samview_settings_t* settin
         sam_filter_t *filt = settings->filter;
         if (!filt)
             return -1;
-        hdr_bam_t bh = {h, b};
-        if (sam_filter_eval(filt, &bh, bam_sym_lookup, &res)) {
+        hb_pair hb = {h, b};
+        if (sam_filter_eval(filt, &hb, bam_sym_lookup, &res)) {
             print_error("view", "Couldn't parse expression: \"%s\"",
                         settings->match_expr);
             fexpr_free(&res);

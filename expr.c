@@ -40,7 +40,7 @@ DEALINGS IN THE SOFTWARE.  */
 
 // Could also cache fexpr_t stack here for kstring reuse?
 #define MAX_REGEX 10
-typedef struct sam_filter {
+typedef struct sam_filter_t {
     char *str;
     int parsed;
     int curr_regex, max_regex;
@@ -190,9 +190,17 @@ static int simple_expr(sam_filter_t *filt, void *data, sym_func *fn,
             if (backslash) {
                 size_t i, j;
                 for (i = j = 0; i < res->s.l; i++) {
-                    if (res->s.s[i] == '\\')
-                        i++;
                     res->s.s[j++] = res->s.s[i];
+                    if (res->s.s[i] == '\\') {
+                        switch (res->s.s[++i]) {
+                        case '"': res->s.s[j-1] = '"'; break;
+                        case '\\':res->s.s[j-1] = '\\'; break;
+                        case 't': res->s.s[j-1] = '\t'; break;
+                        case 'n': res->s.s[j-1] = '\n'; break;
+                        case 'r': res->s.s[j-1] = '\r'; break;
+                        default:  res->s.s[j++] = res->s.s[i];
+                        }
+                    }
                 }
                 res->s.s[j] = 0;
                 res->s.l = j;
@@ -239,12 +247,12 @@ static int unary_expr(sam_filter_t *filt, void *data, sym_func *fn,
         } else {
             res->d = !(int64_t)res->d;
         }
-        res->is_true = !res->is_true;
+        res->is_true = res->d != 0;
     } else if (*str == '~') {
         err = unary_expr(filt, data, fn, str+1, end, res);
         err |= res->is_str;
         res->d = ~(int64_t)res->d;
-        res->is_true = !res->is_true;
+        res->is_true = res->d != 0;
     } else {
         err = simple_expr(filt, data, fn, str, end, res);
     }
@@ -587,7 +595,7 @@ static int expression(sam_filter_t *filt, void *data, sym_func *fn,
     return and_expr(filt, data, fn, str, end, res);
 }
 
-sam_filter_t *sam_filter_init(char *str) {
+sam_filter_t *sam_filter_init(const char *str) {
     sam_filter_t *f = calloc(1, sizeof(*f));
     if (!f) return NULL;
 

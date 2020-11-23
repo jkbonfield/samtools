@@ -22,8 +22,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.  */
 
-#ifndef EXPR_H
-#define EXPR_H
+#ifndef HTS_EXPR_H
+#define HTS_EXPR_H
 
 #include <htslib/kstring.h>
 
@@ -44,13 +44,13 @@ typedef struct {
 
 #define FEXPR_INIT {0, 0, KS_INITIALIZE, 0}
 
-typedef struct sam_filter sam_filter_t;
+typedef struct sam_filter_t sam_filter_t;
 
 // Create a SAM filter for expression "str".
 //
 // Returns a pointer on success,
 //         NULL on failure
-sam_filter_t *sam_filter_init(char *str);
+sam_filter_t *sam_filter_init(const char *str);
 
 // Frees a sam_filter_t created via sam_filter_init
 void sam_filter_free(sam_filter_t *filt);
@@ -62,4 +62,4 @@ static inline void fexpr_free(fexpr_t *f) {
     ks_free(&f->s);
 }
 
-#endif /* EXPR_H */
+#endif /* HTS_EXPR_H */
