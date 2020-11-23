@@ -74,16 +74,20 @@ typedef struct samview_settings {
 extern const char *bam_get_library(sam_hdr_t *header, const bam1_t *b);
 extern int bam_remove_B(bam1_t *b);
 
+// Bam record pointer and SAM header combined
+typedef struct {
+    const sam_hdr_t *h;
+    const bam1_t *b;
+} hdr_bam_t;
+
 // Looks up variable names in str and replaces them with their value.
 // Also supports aux tags.
 //
 // Note the expression parser deliberately overallocates str size so it
 // is safe to use memcmp over strcmp.
 static int bam_sym_lookup(void *data, char *str, char **end, fexpr_t *res) {
-    bam1_t *b = (bam1_t *)data;
-
-    // TODO:
-    // - mtid as mrname string comparison too?  Needs hdr (data as struct).
+    hdr_bam_t *hb = (hdr_bam_t *)data;
+    const bam1_t *b = hb->b;
 
     res->is_str = 0;
     switch(*str) {
@@ -168,6 +172,12 @@ static int bam_sym_lookup(void *data, char *str, char **end, fexpr_t *res) {
             *end = str+4;
             res->d = b->core.mtid;
             return 0;
+        } else if (memcmp(str, "mrname", 6) == 0) {
+            *end = str+6;
+            res->is_str = 1;
+            const char *rn = sam_hdr_tid2name(hb->h, b->core.mtid);
+            kputs(rn ? rn : "*", ks_clear(&res->s));
+            return 0;
         }
         break;
 
@@ -204,6 +214,12 @@ static int bam_sym_lookup(void *data, char *str, char **end, fexpr_t *res) {
         if (memcmp(str, "rlen", 4) == 0) {
             *end = str+4;
             res->d = bam_cigar2rlen(b->core.n_cigar, bam_get_cigar(b));
+            return 0;
+        } else if (memcmp(str, "rname", 5) == 0) {
+            *end = str+5;
+            res->is_str = 1;
+            const char *rn = sam_hdr_tid2name(hb->h, b->core.tid);
+            kputs(rn ? rn : "*", ks_clear(&res->s));
             return 0;
         }
         break;
@@ -340,7 +356,8 @@ static int process_aln(const sam_hdr_t *h, bam1_t *b, samview_settings_t* settin
         sam_filter_t *filt = settings->filter;
         if (!filt)
             return -1;
-        if (sam_filter_eval(filt, b, bam_sym_lookup, &res)) {
+        hdr_bam_t bh = {h, b};
+        if (sam_filter_eval(filt, &bh, bam_sym_lookup, &res)) {
             print_error("view", "Couldn't parse expression: \"%s\"",
                         settings->match_expr);
             fexpr_free(&res);
