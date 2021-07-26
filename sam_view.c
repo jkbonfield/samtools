@@ -656,8 +656,13 @@ int main_samview(int argc, char *argv[])
         case LONGOPT('a'): settings.add_flag |= bam_str2flag(optarg); break;
 
         case 'x':
-            if (parse_aux_list(&settings.aux_blacklist, optarg))
-                return usage(stderr, EXIT_FAILURE, 0);
+            if (*optarg == '^') {
+                if (parse_aux_list(&settings.aux_whitelist, optarg+1))
+                    return usage(stderr, EXIT_FAILURE, 0);
+            } else {
+                if (parse_aux_list(&settings.aux_blacklist, optarg))
+                    return usage(stderr, EXIT_FAILURE, 0);
+            }
             break;
 
         case LONGOPT('x'):
@@ -1080,9 +1085,10 @@ static int usage(FILE *fp, int exit_status, int is_long_help)
 "      --add-flags FLAG       Add FLAGs to reads\n"
 "      --remove-flags FLAG    Remove FLAGs from reads\n"
 "  -x, --remove-tag STR\n"
-"           comma-separated read tags to strip (repeatable) [null]\n"
+"               Comma-separated read tags to strip (repeatable) [null]\n"
 "      --keep-tag STR\n"
-"           comma-separated read tags to preserve (repeatable) [null]\n"
+"               Comma-separated read tags to preserve (repeatable) [null].\n"
+"               Equivalent to \"-x ^STR\"\n"
 "  -B, --remove-B             Collapse the backward CIGAR operation\n"
 "\n"
 "General options:\n"
