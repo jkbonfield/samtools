@@ -1105,14 +1105,16 @@ int bam_merge_core2(int by_qname, char* sort_tag, const char *out, const char *m
 
         hdr[i] = hin;
 
+        int order_ok = 1;
         if ((translation_tbl+i)->lost_coord_sort && !by_qname) {
             fprintf(stderr, "[bam_merge_core] Order of targets in file %s caused coordinate sort to be lost\n", fn[i]);
+            order_ok = 0;
         }
 
         if (!refs && cram_get_refs(fp[i]))
             refs = cram_get_refs(fp[i]);
 
-        if (refs && hts_set_opt(fp[i], CRAM_OPT_SHARED_REF, refs))
+        if (order_ok && refs && hts_set_opt(fp[i], CRAM_OPT_SHARED_REF, refs))
             return -1;  // FIXME: memory leak
     }
 
