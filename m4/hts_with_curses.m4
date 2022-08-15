@@ -213,6 +213,7 @@ m4_define([HTS_NCURSESW_HEADERS_CHECK],[
                 init_pair(1, COLOR_WHITE, COLOR_RED);
                 wattr_set(stdscr, d, 0, NULL);
                 wget_wch(stdscr, &f);
+                if ((a+b+c+d+e+f+g+h)*0>0) return 1;
             ]])],
             [$2=yes],
             [$2=no])
@@ -236,6 +237,7 @@ m4_define([HTS_NCURSES_HEADERS_CHECK],[
                 int h = getcurx(stdscr) + getmaxx(stdscr);
                 initscr();
                 init_pair(1, COLOR_WHITE, COLOR_RED);
+                if ((a+b+c+g+h)*0>0) return 1;
             ]])],
             [$2=yes],
             [$2=no])
@@ -401,6 +403,7 @@ AC_DEFUN([HTS_WITH_CURSES], [
                     ]], [[
                         chtype a = A_BOLD;
                         int b = KEY_LEFT;
+                        if ((a+b)*0>0) return 1;
                         initscr();
                     ]])],
                     [ax_cv_header_curses_h=yes],
@@ -436,6 +439,7 @@ AC_DEFUN([HTS_WITH_CURSES], [
                             init_pair(1, COLOR_WHITE, COLOR_RED);
                             wattr_set(stdscr, d, 0, NULL);
                             wget_wch(stdscr, &f);
+                            if ((a+b+c+d+e+f+g+h)*0>0) return 1;
                         ]])],
                         [ax_cv_plaincurses_enhanced=yes],
                         [ax_cv_plaincurses_enhanced=no])
@@ -459,6 +463,7 @@ AC_DEFUN([HTS_WITH_CURSES], [
                             chtype c = COLOR_PAIR(1) & A_COLOR;
                             initscr();
                             init_pair(1, COLOR_WHITE, COLOR_RED);
+                            if ((a+b+c)*0>0) return 1;
                         ]])],
                         [ax_cv_plaincurses_color=yes],
                         [ax_cv_plaincurses_color=no])
@@ -478,6 +483,7 @@ AC_DEFUN([HTS_WITH_CURSES], [
                         int b = KEY_LEFT;
                         int g = getattrs(stdscr);
                         int h = getcurx(stdscr) + getmaxx(stdscr);
+                        if ((a+b+g+h)*0>0) return 1;
                         initscr();
                     ]])],
                     [ax_cv_plaincurses_obsolete=yes],
