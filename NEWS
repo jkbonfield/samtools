@@ -1,6 +1,16 @@
 Release a.b
 -----------
 
+Bug fixes:
+
+* Fixed a 1.17 regression in samtools sort -M (minimiser hash) where
+  the sort order wasn't optimal.  The data was valid, but with poorer
+  compression ratios than desired. (PR#1818)
+
+* Miscellaneous improvements to man pages.
+  (PR#1802, fixes #1801.  PR#1814)
+
+
 Release 1.17 (21st February 2023)
 ---------------------------------
 
