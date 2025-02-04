@@ -250,6 +250,7 @@ typedef struct {
     // Internal state, shared between threads
     char *fn;
     FILE *fp_out;
+    sam_global_args ga_in;
     sam_hdr_t *h;
     int nthreads;
     hts_tpool *pool;
@@ -2594,8 +2595,14 @@ int pileup_loop_parallel(consensus_opts *opts) {
 
     thread_data_t *tdata = opts->tdata;
     for (int i = 1; i <= opts->nthreads; i++) {
-        tdata[i].fp = sam_open(opts->fn, "r"); // CHECK
-        tdata[i].fai = fai_load(opts->ref_fn);  // CHECK
+        tdata[i].fp = sam_open_format(opts->fn, "r",
+                                      (htsFormat *)&opts->ga_in);
+        if (!tdata[i].fp)
+            goto err;
+        if (opts->ref_fn) {
+            if (!(tdata[i].fai = fai_load(opts->ref_fn)))
+                goto err;
+        }
         if (tdata[i].fp->format.format == cram) {
             // For CRAM, as indices are tied to a file descriptor
             tdata[i].idx = sam_index_load(tdata[i].fp, opts->fn);
@@ -2999,11 +3006,11 @@ int main_consensus(int argc, char **argv) {
 
         // Internal state
         .fp_out       = stdout,
+        .ga_in        = SAM_GLOBAL_ARGS_INIT
     };
 
     set_qcal(&opts.qcal, QCAL_FLAT);
 
-    sam_global_args ga = SAM_GLOBAL_ARGS_INIT;
     static const struct option lopts[] = {
         SAM_OPT_GLOBAL_OPTIONS('-', 0, 'O', '-', 'T', '@'),
         {"use-qual",           no_argument,       NULL, 'q'},
@@ -3240,7 +3247,9 @@ int main_consensus(int argc, char **argv) {
             opts.ref_qual = atoi(optarg);
             break;
 
-        default:  if (parse_sam_global_opt(c, optarg, lopts, &ga) == 0) break;
+        default:
+            if (parse_sam_global_opt(c, optarg, lopts, &opts.ga_in) == 0)
+                break;
             /* else fall-through */
         case '?':
             usage_exit(stderr, EXIT_FAILURE);
@@ -3290,9 +3299,10 @@ int main_consensus(int argc, char **argv) {
         else usage_exit(stderr, EXIT_FAILURE);
     }
 
-    opts.nthreads = ga.nthreads;
+    opts.nthreads = opts.ga_in.nthreads;
     opts.tdata = calloc(opts.nthreads+1, sizeof(*opts.tdata));
-    opts.tdata[0].fp = sam_open_format(argv[optind], "r", &ga.in);
+    opts.tdata[0].fp = sam_open_format(argv[optind], "r",
+                                       (htsFormat *)&opts.ga_in);
     opts.tdata[0].ref_tid = -1;
     opts.fn = argv[optind];
     if (opts.tdata[0].fp == NULL) {
@@ -3357,7 +3367,7 @@ int main_consensus(int argc, char **argv) {
 
     if (opts.h)
         sam_hdr_destroy(opts.h);
-    sam_global_args_free(&ga);
+    sam_global_args_free(&opts.ga_in);
 
     if (opts.fp_out && opts.fp_out != stdout)
         ret |= fclose(opts.fp_out) != 0;
