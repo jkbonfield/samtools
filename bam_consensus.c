@@ -2587,6 +2587,8 @@ int pileup_loop_parallel(consensus_opts *opts) {
     int chr = 0, err = -1;
     hts_pos_t start;
     hts_pos_t end;
+    hts_tpool *pool = NULL;
+    hts_tpool_process *q = NULL;
 
     hts_pos_t used_start, used_end;
 
@@ -2611,8 +2613,8 @@ int pileup_loop_parallel(consensus_opts *opts) {
         }
     }
 
-    hts_tpool *pool = hts_tpool_init(opts->nthreads);
-    hts_tpool_process *q = hts_tpool_process_init(pool, opts->nthreads*2, 0);
+    pool = hts_tpool_init(opts->nthreads);
+    q = hts_tpool_process_init(pool, opts->nthreads*2, 0);
     hts_tpool_result *r;
     opts->pool = pool;
 
@@ -2775,6 +2777,11 @@ int pileup_loop_parallel(consensus_opts *opts) {
         fai_destroy(tdata[i].fai);
         free(tdata[i].ref);
     }
+
+    if (q)
+        hts_tpool_process_destroy(q);
+    if (pool)
+        hts_tpool_destroy(pool);
 
     return err;
 }
