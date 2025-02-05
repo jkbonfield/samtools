@@ -1,6 +1,23 @@
 Release a.b
 -----------
 
+New work and changes:
+
+* `samtools consensus` now supports proper multi-threading.  Previously
+  this was restricted to decompression only, but it should now scale better.
+
+Bug fixes:
+
+* `samtools consensus` previously could give different results for BAM and
+  CRAM files with the same content.  This was because MD/NM tag generation
+  was disabled in CRAM, but the decode_md=0 option did nothing with BAM.
+  Note with `--no-adj-MQ` both BAM and CRAM gave identical results.
+
+  Now use `--input-fmt-option decode_md=0` to get the old CRAM behaviour.
+  Otherwise, both BAM and CRAM will be utilising MD/NM to locally modify
+  mapping quality.
+
+
 Release 1.21 (12th September 2024)
 ----------------------------------
 
