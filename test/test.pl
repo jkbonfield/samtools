@@ -2729,7 +2729,6 @@ sub test_view
 
     # unmap excluded reads, ones marked as duplicate in this case
     $test++;
-
     my $unmapped_expected = "$$opts{path}/dat/view.005.unmap.expected.sam";
 
     run_view_test($opts,
@@ -2746,6 +2745,19 @@ sub test_view
                     out => sprintf("%s.test%03d.sam", $out, $test),
                     compare_count => 2);
 
+    # Combine unmap with unoutput.
+    # NB: this test relies on -U base_fn.sam overwriting -o base_fn.sam.
+    # The alternative would be two run_view_test commands to explicitly
+    # read back the -U output and test it.
+    $test++;
+    my $base_fn = sprintf("%s.test%03d", $out, $test);
+    my $unoutput_expected = "$$opts{path}/dat/view.005.unoutput.expected.sam";
+    run_view_test($opts,
+                  msg=> "$test: Unmap + Unoutput dup flagged reads.",
+                  args => ['-h', '-U', "$base_fn.sam",
+                           '-F', 'DUP', '-p', '--no-PG', $dup_sam],
+                  out => "$base_fn.sam",
+                  compare => $unoutput_expected);
 
     # retrieve reads from a region including their mates
     my $count_output;
