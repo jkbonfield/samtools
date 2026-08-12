@@ -1,0 +1,10 @@
+#!/bin/sh -x
+
+CC=${CC:-clang21}
+
+# Build htslib too
+# (cd ../../../htslib; make clean; make CC="$CC -fsanitize=address,undefined" CFLAGS="-g -O3 -DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION" -j8)
+
+# cd ../..;make -j8 CC="$CC -fsanitize=address,undefined"  CFLAGS=-g
+(cd ../..;$CC -I. -I../htslib -fsanitize=address,undefined,fuzzer -g -DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION -Dexit=fuzz_exit test/fuzz/fuzz_mpileup.c -L./lz4 bam_aux.o bam_index.o bam_plcmd.c sam_view.o bam_fastq.o bam_cat.o bam_md.o bam_plbuf.o bam_reheader.o bam_sort.o bam_rmdup.o bam_rmdupse.o bam_mate.o bam_stat.o bam_color.o bam2bcf.o sample.o cut_target.o phase.o bam2depth.o coverage.o padding.o bedcov.o bamshuf.o faidx.o dict.o stats.o stats_isize.o bam_flags.o bam_split.o bam_tview.o bam_tview_curses.o bam_tview_html.o bam_lpileup.o bam_quickcheck.o bam_addrprg.o bam_markdup.o tmp_file.o bam_ampliconclip.o amplicon_stats.o bam_import.o bam_samples.o bam_consensus.o consensus_pileup.o reference.o reset.o cram_size.o bam_checksum.o ./lz4/lz4.o libst.a ../htslib/libhts.a -lpthread -lz -lm -lbz2 -llzma -ldeflate -lcurl -lcrypto -lncursesw -lm -lz  -lpthread -o test/fuzz/fuzz_mpileup)
+
