@@ -163,6 +163,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     int r;
     while ((r = sam_read1(in, hdr, b)) >= 0)
 	;
+    bam_destroy1(b);
     sam_hdr_destroy(hdr);
     hts_close(in);
     if (r < -1)
