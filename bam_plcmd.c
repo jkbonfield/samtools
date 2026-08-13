@@ -538,14 +538,18 @@ static int mpileup(mplp_conf_t *conf, int nfn, char **fn, char **fn_idx)
     hts_pos_t pos, beg0 = 0, end0 = HTS_POS_MAX, ref_len;
     const bam_pileup1_t **plp;
     mplp_ref_t mp_ref = MPLP_REF_INIT;
-    bam_mplp_t iter;
+    bam_mplp_t iter = NULL;
     sam_hdr_t *h = NULL; /* header of first file in input list */
     char *ref;
     FILE *pileup_fp = NULL;
+    int ret = 0;
 
     bam_sample_t *sm = NULL;
     kstring_t buf;
     mplp_pileup_t gplp;
+    kstring_t ks_seq = KS_INITIALIZE;
+    kstring_t ks_mod = KS_INITIALIZE;
+    kstring_t ks_qual = KS_INITIALIZE;
 
     memset(&gplp, 0, sizeof(mplp_pileup_t));
     memset(&buf, 0, sizeof(kstring_t));
@@ -556,7 +560,7 @@ static int mpileup(mplp_conf_t *conf, int nfn, char **fn, char **fn_idx)
 
     if (nfn == 0) {
         fprintf(stderr,"[%s] no input file/data given\n", __func__);
-        exit(EXIT_FAILURE);
+        ret = 1; goto fail;
     }
 
     // read the header of each file in the list and initialize data
@@ -568,25 +572,25 @@ static int mpileup(mplp_conf_t *conf, int nfn, char **fn, char **fn_idx)
         if ( !data[i]->fp )
         {
             fprintf(stderr, "[%s] failed to open %s: %s\n", __func__, fn[i], strerror(errno));
-            exit(EXIT_FAILURE);
+            ret = 1; goto fail;
         }
         if (hts_set_opt(data[i]->fp, CRAM_OPT_DECODE_MD, 0)) {
             fprintf(stderr, "Failed to set CRAM_OPT_DECODE_MD value\n");
-            exit(EXIT_FAILURE);
+            ret = 1; goto fail;
         }
 
         if (!refs && conf->fai_fname) {
             if (hts_set_fai_filename(data[i]->fp, conf->fai_fname) != 0) {
                 fprintf(stderr, "[%s] failed to process %s: %s\n",
                         __func__, conf->fai_fname, strerror(errno));
-                exit(EXIT_FAILURE);
+                ret = 1; goto fail;
             }
             refs = cram_get_refs(data[i]->fp);
         } else if (conf->fai_fname) {
             if (hts_set_opt(data[i]->fp, CRAM_OPT_SHARED_REF, refs) != 0) {
                 fprintf(stderr, "[%s] failed to process %s: %s\n",
                         __func__, conf->fai_fname, strerror(errno));
-                exit(EXIT_FAILURE);
+                ret = 1; goto fail;
             }
         }
 
@@ -595,7 +599,7 @@ static int mpileup(mplp_conf_t *conf, int nfn, char **fn, char **fn_idx)
         h_tmp = sam_hdr_read(data[i]->fp);
         if ( !h_tmp ) {
             fprintf(stderr,"[%s] fail to read the header of %s\n", __func__, fn[i]);
-            exit(EXIT_FAILURE);
+            ret = 1; goto fail;
         }
         bam_smpl_add(sm, fn[i], (conf->flag&MPLP_IGNORE_RG)? 0 : sam_hdr_str(h_tmp));
         if (conf->reg) {
@@ -609,11 +613,11 @@ static int mpileup(mplp_conf_t *conf, int nfn, char **fn, char **fn_idx)
 
             if (idx == NULL) {
                 fprintf(stderr, "[%s] fail to load index for %s\n", __func__, fn[i]);
-                exit(EXIT_FAILURE);
+                ret = 1; goto fail;
             }
             if ( (data[i]->iter=sam_itr_querys(idx, h_tmp, conf->reg)) == 0) {
                 fprintf(stderr, "[E::%s] fail to parse region '%s' with %s\n", __func__, conf->reg, fn[i]);
-                exit(EXIT_FAILURE);
+                ret = 1; goto fail;
             }
             if (i == 0) beg0 = data[i]->iter->beg, end0 = data[i]->iter->end, tid0 = data[i]->iter->tid;
             hts_idx_destroy(idx);
@@ -638,7 +642,7 @@ static int mpileup(mplp_conf_t *conf, int nfn, char **fn, char **fn_idx)
 
     if (pileup_fp == NULL) {
         fprintf(stderr, "[%s] failed to write to %s: %s\n", __func__, conf->output_fname, strerror(errno));
-        exit(EXIT_FAILURE);
+        ret = 1; goto fail;
     }
 
     // init pileup
@@ -659,15 +663,12 @@ static int mpileup(mplp_conf_t *conf, int nfn, char **fn, char **fn_idx)
 
 
     bam_mplp_set_maxcnt(iter, max_depth);
-    int ret, err = 0;
+    int err = 0;
     int last_tid = -1;
     hts_pos_t last_pos = -1;
     int one_seq = 0;
 
     // begin pileup
-    kstring_t ks_seq = KS_INITIALIZE;
-    kstring_t ks_mod = KS_INITIALIZE;
-    kstring_t ks_qual = KS_INITIALIZE;
     while ( (ret=bam_mplp64_auto(iter, &tid, &pos, n_plp, plp)) > 0) {
         data[0]->curr_tid = tid;
         one_seq = 1; // at least 1 output
@@ -688,11 +689,11 @@ static int mpileup(mplp_conf_t *conf, int nfn, char **fn, char **fn_idx)
                         mplp_get_ref(data[0], last_tid, &ref, &ref_len);
                         if (print_empty_pileup(&buf, conf, sam_hdr_tid2name(h, last_tid), last_pos, nfn, ref, ref_len)) {
                             fprintf(stderr, "Failed to make empty pileup, tid %d, pos %"PRIhts_pos".\n", last_tid, last_pos);
-                            goto fail;
+                            ret = 1; goto fail;
                         }
                         if (buf.l != fwrite(buf.s, 1, buf.l, pileup_fp)) {
                             fprintf(stderr, "Failed to write pileup data.\n");
-                            goto fail;
+                            ret = 1; goto fail;
                         }
                         ks_clear(&buf);
                     }
@@ -719,11 +720,11 @@ static int mpileup(mplp_conf_t *conf, int nfn, char **fn, char **fn_idx)
                     continue;
                 if (print_empty_pileup(&buf, conf, rname, last_pos, nfn, ref, ref_len)) {
                     fprintf(stderr, "Failed to make empty pileup, tid %d, pos %"PRIhts_pos".\n", tid, last_pos);
-                    goto fail;
+                    ret = 1;goto fail;
                 }
                 if (buf.l != fwrite(buf.s, 1, buf.l, pileup_fp)) {
                     fprintf(stderr, "Failed to write pileup data.\n");
-                    goto fail;
+                    ret = 1; goto fail;
                 }
                 ks_clear(&buf);
             }
@@ -943,11 +944,11 @@ static int mpileup(mplp_conf_t *conf, int nfn, char **fn, char **fn_idx)
         err |= kputc('\n', &buf) < 0;
         if (err) {
             fprintf(stderr, "Failed to format pileup data, tid %d, pos %"PRIhts_pos".\n", tid, pos);
-            goto fail;
+            ret = 1; goto fail;
         }
         if (buf.l != fwrite(buf.s, 1, buf.l, pileup_fp)) {
             fprintf(stderr, "Failed to write pileup data.\n");
-            goto fail;
+            ret = 1; goto fail;
         }
         ks_clear(&buf);
     }
@@ -958,8 +959,7 @@ static int mpileup(mplp_conf_t *conf, int nfn, char **fn, char **fn_idx)
 
     if (ret < 0) {
         print_error("mpileup", "error reading from input file");
-        ret = EXIT_FAILURE;
-        goto fail;
+        ret = 1; goto fail;
     }
 
     if (conf->all) {
@@ -980,11 +980,11 @@ static int mpileup(mplp_conf_t *conf, int nfn, char **fn, char **fn_idx)
                     continue;
                 if (print_empty_pileup(&buf, conf, rname, last_pos, nfn, ref, ref_len)) {
                     fprintf(stderr, "Failed to make empty pileup, tid %d, pos %"PRIhts_pos".\n", last_tid, last_pos);
-                    goto fail;
+                    ret = 1; goto fail;
                 }
                 if (buf.l != fwrite(buf.s, 1, buf.l, pileup_fp)) {
                     fprintf(stderr, "Failed to write pileup data.\n");
-                    goto fail;
+                    ret = 1; goto fail;
                 }
                 ks_clear(&buf);
             }
@@ -1005,7 +1005,7 @@ fail:
     bam_smpl_destroy(sm); free(buf.s);
     for (i = 0; i < gplp.n; ++i) free(gplp.plp[i]);
     free(gplp.plp); free(gplp.n_plp); free(gplp.m_plp);
-    bam_mplp_destroy(iter);
+    if (iter) bam_mplp_destroy(iter);
     sam_hdr_destroy(h);
     for (i = 0; i < nfn; ++i) {
         sam_close(data[i]->fp);
@@ -1178,6 +1178,7 @@ int bam_mpileup(int argc, char *argv[])
     mplp.sep = ',';
     mplp.empty = '*';
     sam_global_args_init(&mplp.ga);
+    int is_err = 1;
 
     static const struct option lopts[] =
     {
@@ -1237,11 +1238,11 @@ int bam_mpileup(int argc, char *argv[])
         case 'x': mplp.flag &= ~MPLP_SMART_OVERLAPS; break;
         case  1 :
             mplp.rflag_require = bam_str2flag(optarg);
-            if ( mplp.rflag_require<0 ) { fprintf(stderr,"Could not parse --rf %s\n", optarg); return 1; }
+            if ( mplp.rflag_require<0 ) { fprintf(stderr,"Could not parse --rf %s\n", optarg); goto err; }
             break;
         case  2 :
             mplp.rflag_filter = bam_str2flag(optarg);
-            if ( mplp.rflag_filter<0 ) { fprintf(stderr,"Could not parse --ff %s\n", optarg); return 1; }
+            if ( mplp.rflag_filter<0 ) { fprintf(stderr,"Could not parse --ff %s\n", optarg); goto err; }
             break;
         case  3 : mplp.output_fname = optarg; break;
         case  5 : mplp.flag |= MPLP_PRINT_QNAME; break;
@@ -1249,7 +1250,7 @@ int bam_mpileup(int argc, char *argv[])
         case  7 :
             if (build_auxlist(&mplp, optarg) != 0) {
                 fprintf(stderr,"Could not build aux list using '%s'\n", optarg);
-                return 1;
+                goto err;
             }
             break;
         case 8: mplp.sep = optarg[0]; break;
@@ -1270,7 +1271,7 @@ int bam_mpileup(int argc, char *argv[])
                   //  with few BED intervals and big BAMs. Todo: devise a heuristic to determine
                   //  best strategy, that is streaming or jumping.
                   mplp.bed = bed_read(optarg);
-                  if (!mplp.bed) { print_error_errno("mpileup", "Could not read file \"%s\"", optarg); return 1; }
+                  if (!mplp.bed) { print_error_errno("mpileup", "Could not read file \"%s\"", optarg); goto err; }
                   break;
         case 'B': mplp.flag &= ~MPLP_REALN; break;
         case 'X': has_index_file = 1; break;
@@ -1293,10 +1294,13 @@ int bam_mpileup(int argc, char *argv[])
                 mplp.rghash = khash_str2int_init();
                 if ((fp_rg = fopen(optarg, "r")) == NULL) {
                     fprintf(stderr, "[%s] Fail to open file %s.\n", __func__, optarg);
-                    return 1;
+                    goto err;
                 }
-                while (!feof(fp_rg) && fscanf(fp_rg, "%1023s", buf) > 0)
-                    khash_str2int_inc(mplp.rghash, strdup(buf));
+                // this is not a good style, but forgive me...
+                while (!feof(fp_rg) && fscanf(fp_rg, "%s", buf) > 0) {
+                    if (!khash_str2int_has_key(mplp.rghash, buf))
+                        khash_str2int_inc(mplp.rghash, strdup(buf));
+                }
                 fclose(fp_rg);
             }
             break;
@@ -1306,33 +1310,33 @@ int bam_mpileup(int argc, char *argv[])
             /* else fall-through */
         case '?':
             print_usage(stderr, &mplp);
-            return 1;
+            goto err;
         }
     }
     if (!mplp.fai && mplp.ga.reference) {
         mplp.fai_fname = mplp.ga.reference;
         mplp.fai = fai_load(mplp.fai_fname);
-        if (mplp.fai == NULL) return 1;
+        if (mplp.fai == NULL) goto err;
     }
 
     if ( !(mplp.flag&MPLP_REALN) && mplp.flag&MPLP_REDO_BAQ )
     {
         fprintf(stderr,"Error: The -B option cannot be combined with -E\n");
-        return 1;
+        goto err;
     }
     if (use_orphan) mplp.flag &= ~MPLP_NO_ORPHAN;
     if (argc == 1)
     {
         print_usage(stderr, &mplp);
-        return 1;
+        goto err;
     }
     int ret;
     if (file_list) {
         if (has_index_file) {
             fprintf(stderr,"Error: The -b option cannot be combined with -X\n"); // No customize index loc in file list mode
-            return 1;
+            goto err;
         }
-        if ( read_file_list(file_list,&nfiles,&fn) ) return 1;
+        if ( read_file_list(file_list,&nfiles,&fn) ) goto err;
         ret = mpileup(&mplp,nfiles,fn,NULL);
         for (c=0; c<nfiles; c++) free(fn[c]);
         free(fn);
@@ -1341,7 +1345,7 @@ int bam_mpileup(int argc, char *argv[])
         if (has_index_file) {
             if ((argc - optind)%2 !=0) { // Calculate # of input BAM files
                 fprintf(stderr, "Odd number of filenames detected! Each BAM file should have an index file\n");
-                return 1;
+                goto err;
             }
             nfiles = (argc - optind)/2;
             ret = mpileup(&mplp, nfiles, argv + optind, argv + nfiles + optind);
@@ -1350,11 +1354,14 @@ int bam_mpileup(int argc, char *argv[])
             ret = mpileup(&mplp, nfiles, argv + optind, NULL);
         }
     }
+
+    is_err = 0;
+ err:
     if (mplp.rghash) khash_str2int_destroy_free(mplp.rghash);
     free(mplp.pl_list);
     if (mplp.fai) fai_destroy(mplp.fai);
     if (mplp.bed) bed_destroy(mplp.bed);
     if (mplp.auxlist) kl_destroy(auxlist, (klist_t(auxlist) *)mplp.auxlist);
     sam_global_args_free(&mplp.ga);
-    return ret;
+    return is_err ? 1 : ret;
 }
