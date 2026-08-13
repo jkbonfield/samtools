@@ -150,16 +150,24 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 	return -1;
     }
 
+    // Reject long SQ lines, so we have faster mpileup -a
     int n_targets = sam_hdr_nref(hdr);
     for (int i = 0; i < n_targets; i++) {
         hts_pos_t len = sam_hdr_tid2len(hdr, i);
 	if (len > 1000) {
 	    hts_close(in);
 	    sam_hdr_destroy(hdr);
-	    return -1; // skip oversize SQ headers for speed
+	    return -1;
 	}
     }
 
+    // Reject inputs that don't parse, as we don't need to fuzz that
+    // (htslib does already), and our tests are slow so reserve it for
+    // correct data.
+    //
+    // We could do the same with unsorted data, but don't yet.
+    // TODO: maybe we need to truncate the input somehow?  So we get
+    // the valid data only?
     bam1_t *b = bam_init1();
     if (!b)
 	abort();
