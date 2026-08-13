@@ -153,8 +153,11 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     int n_targets = sam_hdr_nref(hdr);
     for (int i = 0; i < n_targets; i++) {
         hts_pos_t len = sam_hdr_tid2len(hdr, i);
-	if (len > 1000)
+	if (len > 1000) {
+	    hts_close(in);
+	    sam_hdr_destroy(hdr);
 	    return -1; // skip oversize SQ headers for speed
+	}
     }
 
     bam1_t *b = bam_init1();
