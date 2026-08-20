@@ -190,13 +190,16 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     if (data[0] & 0x01) { argv[argc++] = "-s"; argv[argc++] = "auto.1"; }
     // TODO: fuzz expression language.  Use a dedicated fuzzer maybe
 
+    // Some options need an index.  We would need to first save the data and
+    // index it before fuzzing these, so they're commented out for now.
+
     if (data[0] & 0x01)   argv[argc++] = "-b";
     if (data[0] & 0x02)   argv[argc++] = "-c";
     if (data[0] & 0x04)   argv[argc++] = "-C";
     if (data[0] & 0x08) { argv[argc++] = "-F"; argv[argc++] = "0xf00"; }
     if (data[0] & 0x10)   argv[argc++] = "-n";
     if (data[0] & 0x20) { argv[argc++] = "-t"; argv[argc++] = "ref.fa"; }
-    if (data[0] & 0x40)   argv[argc++] = "-P";
+    //if (data[0] & 0x40)   argv[argc++] = "-P"; // needs index
     if (data[0] & 0x80)   argv[argc++] = "-H";
 
     if (data[1] & 0x01) { argv[argc++] = "--rf"; argv[argc++] = "0xc0"; }
