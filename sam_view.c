@@ -97,6 +97,9 @@ typedef struct samview_settings {
     int count_rf; // CRAM_OPT_REQUIRED_FIELDS for view -c
     int exclude_no_rg;
     int remove_ur;
+
+    // Used for tvhash query
+    kstring_t tag_ks;
 } samview_settings_t;
 
 // Copied from htslib/sam.c.
@@ -196,19 +199,19 @@ static int process_aln(const sam_hdr_t *h, bam1_t *b, samview_settings_t* settin
         uint8_t *s = bam_aux_get(b, settings->tag);
         if (s) {
             if (settings->tvhash) {
-                char t[32], *val;
-                if (*s == 'i' || *s == 'I' || *s == 's' || *s == 'S' || *s == 'c' || *s == 'C') {
-                    int ret = snprintf(t, 32, "%"PRId64, bam_aux2i(s));
-                    if (ret > 0) val = t;
-                    else return 1;
-                } else if (*s == 'A') {
-                    t[0] = *(s+1);
-                    t[1] = 0;
-                    val = t;
-                } else {
-                    val = (char *)(s+1);
-                }
-                khint_t k = kh_get(str, settings->tvhash, val);
+                // Turn the aux tag into a string format
+                uint8_t *end = b->data + b->l_data;
+                ks_clear(&settings->tag_ks);
+                if (!(sam_format_aux1(s-2, *s, s+1, end, &settings->tag_ks)))
+                    return 1;
+
+                // format_aux1 doesn't always nul terminate (bug)
+                if (kputc(0, &settings->tag_ks) < 0)
+                    return 1;
+
+                // ks->s+5 skips XX:Z:
+                khint_t k = kh_get(str, settings->tvhash,
+                                   settings->tag_ks.s+5);
                 if (k == kh_end(settings->tvhash)) return 1;
             }
         } else {
@@ -890,6 +893,7 @@ int main_samview(int argc, char *argv[])
     settings.subsam_frac = -1.0;
     settings.subsam_seed_auto = 1;  // default: derive seed from input header
     settings.count_rf = SAM_FLAG; // don't want 0, and this is quick
+    ks_initialize(&settings.tag_ks);
 
     static const struct option lopts[] = {
         SAM_OPT_GLOBAL_OPTIONS('-', 0, 'O', 0, 'T', '@'),
@@ -1652,6 +1656,7 @@ view_end:
     free(arg_list);
 
     aux_list_free(&settings);
+    ks_free(&settings.tag_ks);
 
     return ret;
 }
