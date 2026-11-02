@@ -2452,6 +2452,8 @@ static void init_stat_structs(stats_t* stats, stats_info_t* info, const char* gr
     stats->gcd            = calloc(stats->ngcd,sizeof(gc_depth_t));
     if (!stats->gcd) goto nomem;
     if (info->fai) {
+        if (stats->nbases > INT_MAX / stats->nquals)
+            goto nomem;
         stats->mpc_buf    = calloc(stats->nquals*stats->nbases,sizeof(uint64_t));
         if (!stats->mpc_buf) goto nomem;
     } else {
@@ -2815,7 +2817,9 @@ int main_stats(int argc, char *argv[])
                           error("Could not load faidx: %s\n", optarg);
                       break;
             case  1 : info->gcd_bin_size = atof(optarg); break;
-            case 'c': if ( sscanf(optarg,"%d,%d,%d",&info->cov_min,&info->cov_max,&info->cov_step)!= 3 )
+            case 'c': if ( sscanf(optarg,"%d,%d,%d",&info->cov_min,&info->cov_max,&info->cov_step)!= 3
+                           || info->cov_step == 0
+                           || info->cov_min > info->cov_max)
                           error("Unable to parse -c %s\n", optarg);
                       break;
             case 'l': info->filter_readlen = atoi(optarg); break;
