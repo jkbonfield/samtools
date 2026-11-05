@@ -39,6 +39,7 @@ int bam_mpileup(int argc, char *argv[]);
 int bam_merge(int argc, char *argv[]);
 int bam_index(int argc, char *argv[]);
 int bam_sort(int argc, char *argv[]);
+int bam_sort2(int argc, char *argv[]);
 int bam_tview_main(int argc, char *argv[]);
 int bam_mating(int argc, char *argv[]);
 int bam_rmdup(int argc, char *argv[]);
@@ -248,6 +249,7 @@ int main(int argc, char *argv[])
     else if (strcmp(argv[1], "mpileup") == 0)   ret = bam_mpileup(argc-1, argv+1);
     else if (strcmp(argv[1], "merge") == 0)     ret = bam_merge(argc-1, argv+1);
     else if (strcmp(argv[1], "sort") == 0)      ret = bam_sort(argc-1, argv+1);
+    else if (strcmp(argv[1], "sort2") == 0)     ret = bam_sort2(argc-1, argv+1);
     else if (strcmp(argv[1], "index") == 0)     ret = bam_index(argc-1, argv+1);
     else if (strcmp(argv[1], "idxstat") == 0 ||
              strcmp(argv[1], "idxstats") == 0)  ret = bam_idxstats(argc-1, argv+1);

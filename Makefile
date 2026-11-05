@@ -36,7 +36,7 @@ LZ4_LDFLAGS  = -L$(LZ4DIR)
 
 
 AOBJS=      bam_aux.o bam_index.o bam_plcmd.o sam_view.o bam_fastq.o \
-            bam_cat.o bam_md.o bam_plbuf.o bam_reheader.o bam_sort.o \
+            bam_cat.o bam_md.o bam_plbuf.o bam_reheader.o bam_sort.o bam_sort2.o sort2_engine.o \
             bam_rmdup.o bam_rmdupse.o bam_mate.o bam_stat.o bam_color.o \
             bamtk.o bam2bcf.o sample.o \
             cut_target.o phase.o bam2depth.o coverage.o padding.o bedcov.o bamshuf.o \
@@ -196,6 +196,8 @@ bam_reheader.o: bam_reheader.c config.h $(htslib_bgzf_h) $(htslib_sam_h) $(htsli
 bam_rmdup.o: bam_rmdup.c config.h $(htslib_sam_h) $(sam_opts_h) $(samtools_h) $(bam_h) $(htslib_khash_h)
 bam_rmdupse.o: bam_rmdupse.c config.h $(bam_h) $(htslib_sam_h) $(htslib_khash_h) $(htslib_klist_h) $(samtools_h)
 bam_sort.o: bam_sort.c config.h $(htslib_ksort_h) $(htslib_hts_os_h) $(htslib_khash_h) $(htslib_klist_h) $(htslib_kstring_h) $(htslib_sam_h) $(htslib_hts_endian_h) $(htslib_cram_h) $(htslib_thread_pool_h) $(sam_opts_h) $(samtools_h) $(bedidx_h) $(bam_h)
+bam_sort2.o: bam_sort2.c config.h $(htslib_sam_h) $(htslib_bgzf_h) $(htslib_hts_h) $(htslib_thread_pool_h) sam_opts.h samtools.h sort2_engine.h
+sort2_engine.o: sort2_engine.c sort2_engine.h
 bam_split.o: bam_split.c config.h $(htslib_sam_h) $(htslib_khash_h) $(htslib_kstring_h) $(htslib_cram_h) $(htslib_thread_pool_h) $(sam_opts_h) $(samtools_h)
 bam_stat.o: bam_stat.c config.h $(htslib_sam_h) $(samtools_h) $(sam_opts_h)
 bam_tview.o: bam_tview.c config.h $(bam_tview_h) $(htslib_faidx_h) $(htslib_sam_h) $(htslib_bgzf_h) $(samtools_h) $(sam_opts_h)
